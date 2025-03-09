@@ -1,2 +1,4 @@
-env_n
+__pycache__
+.env_n
 data/*
+.vscode
