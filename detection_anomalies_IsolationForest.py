@@ -1,9 +1,13 @@
+"""
+Module de détection d'anomalies multidimensionnelles avec un Isolation Forest.
+Conçu pour s'intégrer à l'architecture existante du Challenge Nexialog.
+"""
 from sklearn.ensemble import IsolationForest
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-import joblib
 import plotly.graph_objects as go
+import joblib
 
 class IsolationForestDetector:
     """
@@ -18,7 +22,7 @@ class IsolationForestDetector:
     
     def train_model(self, df, contamination=0.02, min_samples=100):
         """
-        Train du Isolation Forest sur le jeu de donnée
+        Entraîne un modèle Isolation Forest sur le dataframe fourni
         
         Parameters:
         -----------
@@ -31,7 +35,7 @@ class IsolationForestDetector:
         
         Returns:
         --------
-        None, mais enregistre le modèle et le scaler pour usage ultérieur
+        self : retourne l'instance elle-même pour permettre le chaînage des méthodes
         """
         # Préparation des données
         df = df.copy()
@@ -54,7 +58,7 @@ class IsolationForestDetector:
         self.scaler = StandardScaler()
         X = self.scaler.fit_transform(df_filtered[self.features])
         
-        # Entraînement du modèle
+        # Training du modèle
         self.model = IsolationForest(
             n_estimators=100,
             max_samples='auto',
@@ -127,11 +131,10 @@ class IsolationForestDetector:
         if len(row_to_plot) == 0:
             raise ValueError(f"Aucune donnée trouvée pour la chaîne technique {test_name}")
         
-        # Obtenir les valeurs pour les axes X et Y du modèle d'Isolation Forest
         feature_data = df[selected_features].values
         feature_data_normalized = self.scaler.transform(df[self.features])[:, [self.features.index(f) for f in selected_features]]
         
-        # Créer une grille 2D pour la visualisation
+        # grille 2D pour la visualisation
         x_min, x_max = np.percentile(feature_data[:, 0], [1, 99])
         y_min, y_max = np.percentile(feature_data[:, 1], [1, 99])
         xx, yy = np.meshgrid(
@@ -140,29 +143,43 @@ class IsolationForestDetector:
         )
         
         # Préparer les données pour la prédiction de la grille
-        grid_data = np.c_[xx.ravel(), yy.ravel()]
-        temp_data = np.zeros((grid_data.shape[0], len(self.features)))
-        temp_data[:, [self.features.index(f) for f in selected_features]] = grid_data
+        grid_points = np.c_[xx.ravel(), yy.ravel()]
+        grid_features = np.zeros((grid_points.shape[0], len(self.features)))
+        
+        # Calculer la moyenne pour chaque feature dans l'ensemble des données
+        mean_features = df[self.features].mean().values
+        
+        # Remplir la grille avec les valeurs moyennes pour toutes les features
+        for i in range(len(self.features)):
+            grid_features[:, i] = mean_features[i]
+        
+        # Remplacer les deux features sélectionnées par les valeurs de la grille
+        for i, feature in enumerate(selected_features):
+            idx = self.features.index(feature)
+            grid_features[:, idx] = grid_points[:, i]
+        
+        grid_features_normalized = self.scaler.transform(grid_features)
         
         # Calculer le score d'anomalie pour chaque point de la grille
-        grid_scores = self.model.decision_function(temp_data)
+        grid_scores = self.model.decision_function(grid_features_normalized)
         Z = grid_scores.reshape(xx.shape)
         
-        # Normaliser les scores pour la visualisation
-        Z_normalized = (Z - Z.min()) / (Z.max() - Z.min())
+        # Normaliser les scores pour la visualisation (plus le score est négatif, plus c'est anormal)
+        # On inverse pour que les anomalies forment des "montagnes" plutôt que des "vallées"
+        Z_normalized = -Z  # Inversion pour représenter les anomalies comme des pics
+        Z_normalized = (Z_normalized - Z_normalized.min()) / (Z_normalized.max() - Z_normalized.min())
         
-        # Créer la figure 3D
         fig = go.Figure()
         
-        # Ajouter la surface de densité (inversée pour que les anomalies soient des "vallées")
+        # Ajouter la surface de score d'anomalie (les pics sont des anomalies potentielles)
         fig.add_trace(
             go.Surface(
-                x=xx, y=yy, z=1-Z_normalized,
+                x=xx, y=yy, z=Z_normalized,
                 colorscale='Plasma',
                 opacity=0.8,
                 showscale=True,
                 colorbar=dict(
-                    title="Anomalie",
+                    title="Score d'anomalie",
                     titleside="right"
                 )
             )
@@ -172,22 +189,25 @@ class IsolationForestDetector:
         x_point = float(row_to_plot[selected_features[0]])
         y_point = float(row_to_plot[selected_features[1]])
         
-        # Trouver sa valeur Z dans le modèle (inversée comme la surface)
-        point_score = row_to_plot['isolation_forest_score'].values[0]
-        point_score_normalized = (point_score - Z.min()) / (Z.max() - Z.min())
-        z_point = 1 - point_score_normalized
+        # Calculer le score d'anomalie du point spécifique
+        point_features = row_to_plot[self.features].values[0].reshape(1, -1)
+        point_features_normalized = self.scaler.transform(point_features)
+        point_score = self.model.decision_function(point_features_normalized)[0]
+        
+        # Convertir le score en coordonnée Z normalisée pour l'affichage
+        point_score_normalized = -point_score  # Inversion pour représenter les anomalies comme des pics
+        point_score_normalized = (point_score_normalized - Z.min()) / (Z.max() - Z.min())
         
         # Déterminer si c'est une anomalie
         is_anomaly = row_to_plot['anomaly_score'].values[0] == -1
         marker_color = 'red' if is_anomaly else 'green'
         marker_text = "Anomalie" if is_anomaly else "Normal"
         
-        # Ajouter le point à la visualisation
         fig.add_trace(
             go.Scatter3d(
                 x=[x_point],
                 y=[y_point],
-                z=[z_point + 0.05],  # Légèrement au-dessus pour la visibilité
+                z=[point_score_normalized + 0.05],  # Légèrement au-dessus pour la visibilité
                 mode='markers+text',
                 text=[marker_text],
                 marker=dict(size=8, color=marker_color),
@@ -195,7 +215,6 @@ class IsolationForestDetector:
             )
         )
         
-        # Configurer la mise en page
         fig.update_layout(
             title=f'Détection d\'anomalies par Isolation Forest pour {test_name}',
             scene=dict(
@@ -232,14 +251,11 @@ class IsolationForestDetector:
         anomaly_count = df[df['anomaly_score'] == -1].groupby(node_type).size()
         total_count = df.groupby(node_type).size()
         
-        proportion = (anomaly_count / total_count).fillna(0)
-        mean_score = df.groupby(node_type)['isolation_forest_score'].mean()
-        
         result = pd.DataFrame({
             'anomaly_count': anomaly_count,
             'total_count': total_count,
-            'proportion': proportion,
-            'mean_isolation_forest_score': mean_score
+            'proportion': (anomaly_count / total_count).fillna(0),
+            'mean_isolation_forest_score': df.groupby(node_type)['isolation_forest_score'].mean()
         })
         
         # Tri par proportion d'anomalies décroissante
