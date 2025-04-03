@@ -20,6 +20,7 @@ from utils import import_json_to_dict
 if "donnees_chargees" not in st.session_state:
     # importation de l'heure simulée
     st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).head(10) # TEMPORAIRE
+    st.session_state.lignes_1fev_copy = st.session_state.lignes_1fev.copy()
     # importation des vecteurs de distribution par test
     st.session_state.dict_distribution_test = import_json_to_dict("data/results/dict_test.json")
     # colonnes dans lesquelles injecter et repérer des anomalies
@@ -41,6 +42,7 @@ if "donnees_chargees" not in st.session_state:
         'p_val_std_latence_scoring'
     ]
 
+    st.session_state.p_value_threshold = 5.0 # seuil de sensibilité/rejet
     st.session_state.donnees_chargees = True
     st.session_state.button_launched = False # boutton de détection d'anomalies
 
@@ -126,8 +128,30 @@ with col_btn:
             var_test,
             valeur_insertion)
 
+# choix du seuil d'anomalie
+st.subheader("Configuration du seuil de détection")
+col_threshold, col_set_btn = st.columns([2, 1])
+with col_threshold:
+    new_threshold = st.number_input("Seuil (%) de rejet α pour la détection d'anomalies", 
+                                    min_value=0.5, 
+                                    max_value=50.0, 
+                                    value=st.session_state.p_value_threshold, 
+                                    step=0.5,
+                                    format="%.1f")
+with col_set_btn:
+    if st.button("Valider le seuil"):
+        st.session_state.p_value_threshold = new_threshold
+        st.success(f"Seuil défini à {new_threshold}")
+
+# reinitialiser le dataframe de base
+if st.button("Réinitialiser les données"):
+    # Rechargement des données originales
+    st.session_state.lignes_1fev = st.session_state.lignes_1fev_copy
+    print('Réinitialisation réalisée, len(df) =', len(st.session_state.lignes_1fev))
+    st.session_state.button_launched = False  # Réinitialiser l'état du bouton de détection
+
 ## bouton de lancement de la detection d'anomalies
-if st.button("Lancer la détection d'anomalies par noeud") or st.session_state.button_launched:
+if st.button("Lancer la détection d'anomalies par noeud", type="primary") or st.session_state.button_launched:
     
     st.session_state.button_launched = True
     # instance de classe : recherche les noeuds anormaux
@@ -143,7 +167,17 @@ if st.button("Lancer la détection d'anomalies par noeud") or st.session_state.b
     df_p_values_boucle = nc.get_df_fisher_p_values(st.session_state.lignes_1fev,
                                                    node_type = 'boucle',
                                                    p_values = st.session_state.p_values_col)
-    st.dataframe(df_p_values_boucle)
+
+    st.dataframe(df_p_values_boucle.style.highlight_between(
+    left=0, 
+    right=st.session_state.p_value_threshold / 100.0, # passage en decimal
+    props='background-color: #ff0000'
+    ))
+
+    # suppression des boucles defaillantes pour la suite
+    boucles_defaillantes = df_p_values_boucle[df_p_values_boucle['p_val_avg_dns_time'] < st.session_state.p_value_threshold / 100 ].index.unique()
+    if len(boucles_defaillantes) > 0:
+        st.session_state.lignes_1fev = st.session_state.lignes_1fev[~st.session_state.lignes_1fev['boucle'].isin(boucles_defaillantes)]
 
     # 2eme tableau : peag
     st.header("PEAG anormaux")
@@ -151,7 +185,17 @@ if st.button("Lancer la détection d'anomalies par noeud") or st.session_state.b
     df_p_values_peag = nc.get_df_fisher_p_values(st.session_state.lignes_1fev,
                                                  node_type = 'peag_nro',
                                                  p_values = st.session_state.p_values_col)
-    st.dataframe(df_p_values_peag)
+
+    st.dataframe(df_p_values_peag.style.highlight_between(
+    left=0, 
+    right=st.session_state.p_value_threshold / 100.0, # passage en decimal 
+    props='background-color: #ff0000'
+    ))
+
+    # suppression des boucles defaillantes pour la suite
+    peag_defaillants = df_p_values_peag[df_p_values_peag['p_val_avg_dns_time'] < st.session_state.p_value_threshold / 100].index.unique()
+    if len(peag_defaillants) > 0:
+        st.session_state.lignes_1fev = st.session_state.lignes_1fev[~st.session_state.lignes_1fev['peag_nro'].isin(peag_defaillants)]
 
     # 3eme tableau : OLT
     st.header("OLT anormaux")
@@ -159,7 +203,11 @@ if st.button("Lancer la détection d'anomalies par noeud") or st.session_state.b
     df_p_values_olt = nc.get_df_fisher_p_values(st.session_state.lignes_1fev, 
                                                 node_type = 'olt_name', 
                                                 p_values = st.session_state.p_values_col)
-    st.dataframe(df_p_values_olt)
+    st.dataframe(df_p_values_olt.style.highlight_between(
+    left=0, 
+    right=st.session_state.p_value_threshold / 100.0, # passage en decimal
+    props='background-color: #ff0000'
+    ))
 
     ## Graphiques 3D pour visualiser les anomalies
     st.header("Graphique 3D")
@@ -167,7 +215,7 @@ if st.button("Lancer la détection d'anomalies par noeud") or st.session_state.b
     col_test_names, col_test_vars = st.columns([2, 2])
 
     with col_test_names:
-        test_name = st.selectbox("Test", options=sorted(list(st.session_state.lignes_1fev['name'].unique())))
+        test_name = st.selectbox("Choix de la chaine technique", options=sorted(list(st.session_state.lignes_1fev['name'].unique())))
     with col_test_vars:
         variables_test = st.multiselect("Variables de test", options=st.session_state.variables_test)
 
@@ -196,6 +244,13 @@ if st.button("Lancer la détection d'anomalies par noeud") or st.session_state.b
     values = np.vstack([x, y])
     kernel = gaussian_kde(values)
     Z = np.reshape(kernel(positions).T, X.shape)
+    
+    x_point = float(row_to_plot[variables_test[0]])
+    y_point = float(row_to_plot[variables_test[1]])
+
+    # Calculer la densité (valeur z) à ce point précis en utilisant le même estimateur de noyau
+    point_position = np.array([[x_point], [y_point]])
+    z_point = float(kernel(point_position))
 
     # Fig (3d)
     fig = go.Figure(data=[go.Surface(x=X, y=Y, z=Z, colorscale='Plasma')])
@@ -209,13 +264,18 @@ if st.button("Lancer la détection d'anomalies par noeud") or st.session_state.b
         )
     )
     # utiliser lignes1fev ici
+    if z_point < 0.05:
+        text = "Anomalie"
+    else:
+        text =""
     fig.add_trace(go.Scatter3d(
-        x=row_to_plot[variables_test[0]],
-        y=row_to_plot[variables_test[1]],
-        z=[0.5],                                                       # TEMPORAIRE
+        x=[x_point],
+        y=[y_point],
+        z=[z_point + 0.05],
         mode='markers+text',
-        text=["Anomalie"],
-        marker=dict(size=8, color='red')
+        text=[text],
+        marker=dict(size=8, color='red'),
     ))
+
     # affiche des figures 3d
     st.plotly_chart(fig)

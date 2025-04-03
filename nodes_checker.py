@@ -187,6 +187,7 @@ class NodesChecker:
         
         # correction des p_values avec la méthode Benjamini-Hochberg (pour éviter p-hacking)
         dict_p_val_fisher = self.corriger_p_values(dict_p_val_fisher)
+        
         # conversion en dataframe
         df_p_values = pd.DataFrame.from_dict(dict_p_val_fisher, orient='index')
 
@@ -231,14 +232,15 @@ if __name__ == '__main__':
     # instance de classe : recherche les noeuds anormaux
     nc = NodesChecker()
     # rajout de + 10 de valuers aux tests de 4 peag et 4 olt
-    lignes_1fev = nc.add_anomalies(lignes_1fev, 
-                'peag_nro', 
-                ['01_peag_1', '01_peag_2', '01_peag_3', '01_peag_22'],
-                cols_to_update,
-                10.0)
+    # lignes_1fev = nc.add_anomalies(lignes_1fev, 
+    #             'peag_nro', 
+    #             ['01_peag_1', '01_peag_2', '01_peag_3', '01_peag_22'],
+    #             cols_to_update,
+    #             10.0)
     lignes_1fev = nc.add_anomalies(lignes_1fev, 
                 'olt_name', 
-                ['01_olt_1', '01_olt_2', '01_olt_3', '01_olt_23'],
+                ['01_olt_1', '01_olt_2', '01_olt_3', '01_olt_23', '95_olt_5624', 
+                 '01_olt_70', '95_olt_5625', '95_olt_5630', '95_olt_5627', '95_olt_5626'],
                 cols_to_update,
                 10.0)
     # calcul des p_values à partir des distributions empiriques
@@ -256,9 +258,21 @@ if __name__ == '__main__':
         'p_val_std_latence_scoring'
     ]
 
+    # On regarde les boucles defaillantes -> on enlève ces boucles defaillantes
+    # On regarde les PEAG defaillants -> on enlève ces PEAG defaillants
+    # On regarde les OLT defaillants
+
     # p_values issues du test de Fisher pour les boucles
     df_p_values_boucle = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'boucle', p_values = p_values_col)
+    
+    boucles_defaillantes = df_p_values_boucle[df_p_values_boucle['p_val_avg_dns_time'] < 0.01].index.unique()
+    lignes_1fev = lignes_1fev[~lignes_1fev['boucle'].isin(boucles_defaillantes)] # on enlève les boucles defaillantes
+
     # p_values issues du test de Fisher pour les peag
     df_p_values_peag = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'peag_nro', p_values = p_values_col)
+
+    peag_defaillants = df_p_values_peag[df_p_values_peag['p_val_avg_dns_time'] < 0.01].index.unique()
+    lignes_1fev = lignes_1fev[~lignes_1fev['peag_nro'].isin(peag_defaillants)]  # on enlève les PEAG defaillants
+
     # p_values issues du test de Fisher pour les olt
     df_p_values_olt = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'olt_name', p_values = p_values_col)

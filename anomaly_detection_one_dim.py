@@ -126,7 +126,7 @@ class AnomalyDetectionOneDim:
         return cycle_hp[keep_mask]
     
     @staticmethod
-    def compute_kde(vector):
+    def compute_kde(vector, nb_test):
         """
         calcule une estimation par noyau (kde) de la distribution du vecteur
         avec bandwith = silverman_bw
@@ -134,13 +134,15 @@ class AnomalyDetectionOneDim:
         -----------
         vector : numpy.ndarray
             Vecteur de données (par exemple, shape=(1456,)).
+        nb_test : int
+            Nombre de tests réalisé pour cette chaine technique
             
         Returns:
         --------
         kde : scipy.stats.gaussian_kde
             Objet KDE estimant la distribution du vecteur.
         """
-        n = len(vector)
+        n = nb_test
         std_dev = np.std(vector, ddof=1)
         # calcul de la largeur de bande selon Silverman
         silverman_bw = (4 / (3 * n)) ** (1 / 5) * std_dev 
@@ -149,7 +151,7 @@ class AnomalyDetectionOneDim:
         return kde
 
     @staticmethod
-    def compute_p_value(point, kde, nsamples=100000, alternative="two-sided"):
+    def compute_p_value(point, kde, nsamples=1000, alternative="two-sided"):
         """
         Compare un point à la distribution estimée par le KDE et calcule une p-value
         
@@ -211,37 +213,37 @@ class AnomalyDetectionOneDim:
         # Calcul pour avg_dns_time
         cycle_hp, trend_hp = hpfilter(dict_test['avg_dns_time'][row['name']], lamb=1000)
         cycle_hp_filtered = self.filter_anomalies(cycle_hp, coeff_lower=1, coeff_upper=1, percent_lower=0, percent_upper=99)
-        kde = self.compute_kde(cycle_hp_filtered)
+        kde = self.compute_kde(cycle_hp_filtered, dict_test['nb_test_dns'][row['name']])
         p_val_dns = self.compute_p_value(row['avg_dns_time'] - trend_hp[-1], kde, alternative='greater')
-        
+
         # Calcul pour avg_score_scoring
         cycle_hp, trend_hp = hpfilter(dict_test['avg_score_scoring'][row['name']], lamb=1000)
         cycle_hp_filtered = self.filter_anomalies(cycle_hp, coeff_lower=1, coeff_upper=1, percent_lower=1, percent_upper=100)
-        kde = self.compute_kde(cycle_hp_filtered)
+        kde = self.compute_kde(cycle_hp_filtered, dict_test['nb_test_scoring'][row['name']])
         p_val_score = self.compute_p_value(row['avg_score_scoring'] - trend_hp[-1], kde, alternative='less')
-        
+
         # Calcul pour avg_latence_scoring
         cycle_hp, trend_hp = hpfilter(dict_test['avg_latence_scoring'][row['name']], lamb=1000)
         cycle_hp_filtered = self.filter_anomalies(cycle_hp, coeff_lower=20, coeff_upper=1, percent_lower=0, percent_upper=95)
-        kde = self.compute_kde(cycle_hp_filtered)
+        kde = self.compute_kde(cycle_hp_filtered, dict_test['nb_test_scoring'][row['name']])
         p_val_latence = self.compute_p_value(row['avg_latence_scoring'] - trend_hp[-1], kde, alternative='greater')
         
         # Calcul pour std_dns_time
         cycle_hp, trend_hp = hpfilter(dict_test['std_dns_time'][row['name']], lamb=1000)
         cycle_hp_filtered = self.filter_anomalies(cycle_hp, coeff_lower=1, coeff_upper=1, percent_lower=0, percent_upper=100)
-        kde = self.compute_kde(cycle_hp_filtered)
+        kde = self.compute_kde(cycle_hp_filtered, dict_test['nb_test_dns'][row['name']])
         p_val_std_dns = self.compute_p_value(row['std_dns_time'] - trend_hp[-1], kde, alternative='greater')
         
         # Calcul pour std_score_scoring
         cycle_hp, trend_hp = hpfilter(dict_test['std_score_scoring'][row['name']], lamb=1000)
         cycle_hp_filtered = self.filter_anomalies(cycle_hp, coeff_lower=1, coeff_upper=1, percent_lower=1, percent_upper=99)
-        kde = self.compute_kde(cycle_hp_filtered)
+        kde = self.compute_kde(cycle_hp_filtered, dict_test['nb_test_scoring'][row['name']])
         p_val_std_score = self.compute_p_value(row['std_score_scoring'] - trend_hp[-1], kde, alternative='greater')
         
         # Calcul pour std_latence_scoring
         cycle_hp, trend_hp = hpfilter(dict_test['std_latence_scoring'][row['name']], lamb=1000)
         cycle_hp_filtered = self.filter_anomalies(cycle_hp, coeff_lower=1, coeff_upper=10, percent_lower=0, percent_upper=95)
-        kde = self.compute_kde(cycle_hp_filtered)
+        kde = self.compute_kde(cycle_hp_filtered, dict_test['nb_test_scoring'][row['name']])
         p_val_std_latence = self.compute_p_value(row['std_latence_scoring'] - trend_hp[-1], kde, alternative='greater')
         
         return {
@@ -267,35 +269,32 @@ if __name__ == '__main__':
     
     adod = AnomalyDetectionOneDim()
 
-    # récupération des vecteurs de distribution des tests
-    dict_test = adod.get_test_vectors(df, col_list)
-    # somme les nb de test par combinaison boucle x peag x olt
-    dict_test = adod.sum_nb_test(dict_test)
+    # # récupération des vecteurs de distribution des tests
+    # dict_test = adod.get_test_vectors(df, col_list)
+    # # somme les nb de test par combinaison boucle x peag x olt
+    # dict_test = adod.sum_nb_test(dict_test)
 
-    output_path = "data/results/dict_test.json"
+    # output_path = "data/results/dict_test.json"
+    
+    # export_dict_to_json(dict_test, output_path)
+
     input_path = "data/results/dict_test.json"
-    export_dict_to_json(dict_test, output_path)
-
     dict_test = import_json_to_dict(input_path)
 
-    # # quelques graphiques
-    # for col in col_list:
-    #     GraphCreator.plot_series(dict_test, '01_olt_3_01_peag_3_BU1464', col, title = '_')
-    #     GraphCreator.plot_score_histogram(dict_test, '01_olt_3_01_peag_3_BU1464', col)
-    #     plt.show()
+    # quelques graphiques
+    GraphCreator.plot_series(dict_test, '01_olt_3_01_peag_3_BU1464', 'avg_dns_time', title = '_')
+    GraphCreator.plot_score_histogram(dict_test, '01_olt_3_01_peag_3_BU1464', 'avg_dns_time')
+    plt.show()
 
     # test d'un exemple fictif d'anomalie
     df_t = pd.DataFrame({
         'name':['01_olt_3_01_peag_3_BU1464'],
-        'avg_dns_time': [4],
-        'avg_score_scoring': [2.5],
-        'avg_latence_scoring': [9.45],
-        'std_dns_time': [1.4],
-        'std_score_scoring': [0.81],
-        'std_latence_scoring': [2.5]
-    })
+        'avg_dns_time': [12.98],
+        'std_dns_time': [10.61],
+        'avg_latence_scoring': [18.52],
+        'std_latence_scoring': [10.58],
+        'avg_score_scoring': [13.37],
+        'std_score_scoring': [10.19]})
 
-    # recupération des p-values sur chaque dimension (variable de test) pour cet exemple
     p_values = adod.get_p_values_one_row(df_t.iloc[0], dict_test)
     print(p_values)
-
