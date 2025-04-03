@@ -1,5 +1,6 @@
 __pycache__
 .env_n
+.venv
 data/*
 .vscode
 .str
