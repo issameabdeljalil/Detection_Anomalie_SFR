@@ -12,14 +12,14 @@ ou multidimensionnelle (Isolation Forest)
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 from scipy.stats import gaussian_kde
-from nodes_checker import NodesChecker
-from utils import import_json_to_dict
-from detection_anomalies_IsolationForest import IsolationForestDetector
 import joblib
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+from utils import import_json_to_dict
+from nodes_checker import NodesChecker
+from anomaly_detection_isolation_forest import MultiIsolationForestDetector
 
 # Configuration 
 st.set_page_config(
@@ -57,24 +57,21 @@ def initialize_session_state():
 
         st.session_state.p_value_threshold = 5.0  # Seuil de sensibilité/rejet
         st.session_state.donnees_chargees = True
-        st.session_state.detection_method = "unidimensionnelle"  # Méthode de détection par défaut
         
         # Initialisation du détecteur Isolation Forest
-        st.session_state.isolation_forest = IsolationForestDetector()
-        st.session_state.isolation_forest_trained = False
-        st.session_state.isolation_forest_threshold = 0.05
+        st.session_state.isolation_forest =  MultiIsolationForestDetector(chain_id_col = 'name')
+         # chargement des modeles d'isolation forest
+        st.session_state.isolation_forest.load_models(st.session_state.lignes_1fev_copy)
+
+        st.session_state.isolation_forest_threshold = 0.00
         
         # Variables pour stocker les résultats des analyses
-        st.session_state.results_unidim = {
+        st.session_state.results = {
             "boucles": None,
-            "peag": None,
+            "peag_nro": None,
             "olt": None
         }
-        st.session_state.results_isof = {
-            "boucles": None,
-            "peag": None,
-            "olt": None
-        }
+       
         st.session_state.anomalies_detected = False
 
 # Fonction pour afficher l'en-tête de l'application
@@ -178,18 +175,13 @@ def show_home():
     fig = create_metrics_distribution()
     st.plotly_chart(fig, use_container_width=True)
     
-    # Méthode active d'analyse
-    st.info(f"Méthode de détection active: **{st.session_state.detection_method}**")
     
     # Si des anomalies ont été détectées, afficher un résumé
     if st.session_state.anomalies_detected:
         st.subheader("Résumé des anomalies détectées")
         
-        # Afficher les résultats selon la méthode utilisée
-        if st.session_state.detection_method == "unidimensionnelle":
-            display_unidim_anomaly_summary()
-        else:
-            display_isolation_forest_anomaly_summary()
+   
+    display_anomaly_summary()
     
     # Mini ReadMe sur le projet
     st.markdown("---")
@@ -256,8 +248,8 @@ def create_metrics_distribution():
     return fig
 
 # Fonction pour afficher le résumé des anomalies (approche unidimensionnelle)
-def display_unidim_anomaly_summary():
-    results = st.session_state.results_unidim
+def display_anomaly_summary():
+    results = st.session_state.results
     
     # Créer 3 colonnes
     col1, col2, col3 = st.columns(3)
@@ -279,8 +271,8 @@ def display_unidim_anomaly_summary():
                     st.markdown(f"• **{idx}** ({severity})")
     
     with col2:
-        if results["peag"] is not None:
-            anomalous_peag = results["peag"][results["peag"].min(axis=1) < threshold]
+        if results["peag_nro"] is not None:
+            anomalous_peag = results["peag_nro"][results["peag_nro"].min(axis=1) < threshold]
             st.metric("PEAG anormaux", len(anomalous_peag))
             
             if not anomalous_peag.empty:
@@ -305,55 +297,10 @@ def display_unidim_anomaly_summary():
                     st.markdown(f"• **{idx}** ({severity})")
     
     # Ajout d'une visualisation des métriques principalement affectées
-    if results["boucles"] is not None and results["peag"] is not None and results["olt"] is not None:
+    if results["boucles"] is not None and results["peag_nro"] is not None and results["olt"] is not None:
         display_affected_metrics_chart(results)
-
-# Fonction pour afficher le résumé des anomalies (approche Isolation Forest)
-def display_isolation_forest_anomaly_summary():
-    results = st.session_state.results_isof
-    
-    # Créer 3 colonnes
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if results["boucles"] is not None:
-            anomalous_boucles = results["boucles"][results["boucles"]["is_anomalous"]]
-            st.metric("Boucles anormales", len(anomalous_boucles))
-            
-            if not anomalous_boucles.empty:
-                # Trouver les boucles les plus problématiques (selon la proportion)
-                worst_boucles = anomalous_boucles.sort_values("proportion", ascending=False).head(3)
-                st.write("Boucles les plus critiques:")
-                for idx, row in worst_boucles.iterrows():
-                    st.markdown(f"• **{idx}** ({row['proportion']:.1%})")
-    
-    with col2:
-        if results["peag"] is not None:
-            anomalous_peag = results["peag"][results["peag"]["is_anomalous"]]
-            st.metric("PEAG anormaux", len(anomalous_peag))
-            
-            if not anomalous_peag.empty:
-                # Trouver les PEAG les plus problématiques
-                worst_peag = anomalous_peag.sort_values("proportion", ascending=False).head(3)
-                st.write("PEAG les plus critiques:")
-                for idx, row in worst_peag.iterrows():
-                    st.markdown(f"• **{idx}** ({row['proportion']:.1%})")
-    
-    with col3:
-        if results["olt"] is not None:
-            anomalous_olt = results["olt"][results["olt"]["is_anomalous"]]
-            st.metric("OLT anormaux", len(anomalous_olt))
-            
-            if not anomalous_olt.empty:
-                # Trouver les OLT les plus problématiques
-                worst_olt = anomalous_olt.sort_values("proportion", ascending=False).head(3)
-                st.write("OLT les plus critiques:")
-                for idx, row in worst_olt.iterrows():
-                    st.markdown(f"• **{idx}** ({row['proportion']:.1%})")
-    
-    # Si on a les résultats des anomalies, ajouter une heatmap
-    if hasattr(st.session_state, 'df_with_anomalies'):
         display_anomaly_heatmap()
+
 
 # Fonction pour obtenir un label de gravité basé sur la p-value
 def get_severity_label(p_value):
@@ -380,7 +327,7 @@ def display_affected_metrics_chart(results):
     # Pour chaque métrique, combien de fois elle est sous le seuil
     for metric in metrics:
         count = 0
-        for node_type in ["boucles", "peag", "olt"]:
+        for node_type in ["boucles", "peag_nro", "olt"]:
             if results[node_type] is not None:
                 count += (results[node_type][metric] < threshold).sum()
         anomaly_counts.append(count)
@@ -479,7 +426,7 @@ def show_anomaly_insertion():
             )
         with col_btn:
             if st.button("Insérer anomalies", key="btn_inserer1"):
-                st.write(f"Insertion de {round(valeur_insertion, 2)} dans {var_test} pour {len(boucle_names)} boucles")
+                st.write(f"Insertion d'une valeur de {round(valeur_insertion, 2)} dans {var_test} pour {len(boucle_names)} boucles")
                 st.session_state.lignes_1fev = NodesChecker.add_anomalies(
                     st.session_state.lignes_1fev, 
                     'boucle', 
@@ -515,7 +462,7 @@ def show_anomaly_insertion():
             )
         with col_btn:
             if st.button("Insérer anomalies", key="btn_inserer2"):
-                st.write(f"Insertion de {round(valeur_insertion, 2)} dans {var_test} pour {len(peag_names)} PEAG")
+                st.write(f"Insertion d'une valeur de {round(valeur_insertion, 2)} dans {var_test} pour {len(peag_names)} PEAG")
                 st.session_state.lignes_1fev = NodesChecker.add_anomalies(
                     st.session_state.lignes_1fev, 
                     'peag_nro', 
@@ -551,7 +498,7 @@ def show_anomaly_insertion():
             )
         with col_btn:
             if st.button("Insérer anomalies", key="btn_inserer3"):
-                st.write(f"Insertion de {round(valeur_insertion, 2)} dans {var_test} pour {len(olt_names)} OLT")
+                st.write(f"Insertion d'une valeur de {round(valeur_insertion, 2)} dans {var_test} pour {len(olt_names)} OLT")
                 st.session_state.lignes_1fev = NodesChecker.add_anomalies(
                     st.session_state.lignes_1fev, 
                     'olt_name', 
@@ -572,83 +519,44 @@ def show_anomaly_insertion():
 
 # Page de configuration et détection
 def show_detection_config():
-    st.header("⚙️ Configuration et lancement de la détection")
-    
-    # Choix de la méthode de détection
-    st.subheader("Méthode de détection")
-    detection_method = st.radio(
-        "Choisissez la méthode de détection d'anomalies :",
-        ["Approche unidimensionnelle", "Isolation Forest (multidimensionnelle)"],
-        index=0 if st.session_state.detection_method == "unidimensionnelle" else 1,
-        horizontal=True
-    )
-    
-    st.session_state.detection_method = "unidimensionnelle" if detection_method == "Approche unidimensionnelle" else "isolation_forest"
-    
+    st.header("⚙️ Configuration et lancement de la détection d'anomalies")
+  
     # Configuration du seuil selon la méthode
-    st.subheader("Configuration du seuil")
+    st.subheader("Configuration des seuils")
     
-    if st.session_state.detection_method == "unidimensionnelle":
-        new_threshold = st.slider(
-            "Seuil (%) de rejet α pour la détection d'anomalies", 
-            min_value=0.5, 
-            max_value=20.0, 
-            value=st.session_state.p_value_threshold, 
-            step=0.5,
-            format="%.1f"
-        )
-        st.session_state.p_value_threshold = new_threshold
-        st.info(f"Les p-values inférieures à {new_threshold}% seront considérées comme anormales")
-    else:
-        # Vérifier si le modèle est entraîné
-        if not st.session_state.isolation_forest_trained:
-            st.warning("Le modèle Isolation Forest n'est pas encore entraîné.")
-            train_button = st.button("Entraîner le modèle Isolation Forest", type="primary")
-            
-            if train_button:
-                with st.spinner("Entraînement du modèle en cours..."):
-                    try:
-                        # Charger le dataset complet pour l'entraînement
-                        df_complet = pd.read_csv("/Users/issameabdeljalil/Desktop/M2_MOSEF/challenge_Nexialog/Detection_Anomalie_SFR/data/corrected/new_df.csv")
-                        # Entraîner le modèle
-                        st.session_state.isolation_forest.train_model(df_complet, contamination=0.02)
-                        st.session_state.isolation_forest_trained = True
-                        st.success("Modèle Isolation Forest entraîné avec succès !")
-                    except Exception as e:
-                        st.error(f"Erreur lors de l'entraînement du modèle : {str(e)}")
-                        st.info("Essai de chargement d'un modèle existant...")
-                        try:
-                            st.session_state.isolation_forest.model = joblib.load('isolation_forest_model.joblib')
-                            st.session_state.isolation_forest.scaler = joblib.load('scaler.joblib')
-                            st.session_state.isolation_forest_trained = True
-                            st.success("Modèle Isolation Forest chargé depuis un fichier existant")
-                        except:
-                            st.error("Impossible de charger un modèle existant.")
-        
-        new_threshold = st.slider(
-            "Seuil de proportion d'anomalies pour considérer un nœud comme anormal", 
-            min_value=0.01, 
-            max_value=0.5, 
-            value=st.session_state.isolation_forest_threshold, 
-            step=0.01,
-            format="%.2f"
-        )
-        st.session_state.isolation_forest_threshold = new_threshold
-        st.info(f"Les nœuds avec plus de {new_threshold:.0%} d'anomalies seront considérés comme anormaux")
+    
+    new_threshold = st.slider(
+        "Seuil (%) de rejet α pour la détection d'anomalies", 
+        min_value=0.5, 
+        max_value=20.0, 
+        value=st.session_state.p_value_threshold, 
+        step=0.05,
+        format="%.1f"
+    )
+    st.session_state.p_value_threshold = new_threshold
+    st.info(f"Les variables avec une p-value inférieure à {new_threshold}% seront considérées comme anormales")
+    
+    new_threshold = st.slider(
+        "Seuil de la moyenne des scores d'anomalies pour considérer un nœud comme anormal", 
+        min_value=-1.0, 
+        max_value=0.5, 
+        value=st.session_state.isolation_forest_threshold, 
+        step=0.1,
+        format="%.2f"
+    )
+    st.session_state.isolation_forest_threshold = new_threshold
+    st.info(f"Les nœuds avec une moyenne de scores d'anomalies inférieure à {new_threshold:.0%} seront considérés comme anormaux")
     
     # Lancement de la détection
     st.markdown("---")
     launch_button_text = "🚀 Lancer la détection d'anomalies"
     
     if st.button(launch_button_text, type="primary"):
-        if st.session_state.detection_method == "isolation_forest" and not st.session_state.isolation_forest_trained:
-            st.error("Le modèle Isolation Forest n'est pas entraîné. Veuillez l'entraîner avant de lancer la détection.")
-        else:
-            with st.spinner("Détection d'anomalies en cours..."):
-                run_anomaly_detection()
-                st.session_state.anomalies_detected = True
-                st.success("Détection d'anomalies terminée avec succès!")
-                st.balloons()  # Animation pour célébrer la fin de l'analyse
+        with st.spinner("Détection d'anomalies en cours ..."):
+            run_anomaly_detection()
+            st.session_state.anomalies_detected = True
+            st.success("Détection d'anomalies terminée avec succès!")
+            st.balloons()  # Animation pour célébrer la fin de l'analyse
 
 # Page des résultats
 def show_results():
@@ -661,117 +569,105 @@ def show_results():
     # Création d'onglets pour les différents types de résultats
     tab1, tab2, tab3, tab4 = st.tabs(["Boucles", "PEAG", "OLT", "Visualisation 3D"])
     
-    if st.session_state.detection_method == "unidimensionnelle":
-        results = st.session_state.results_unidim
-        
-        with tab1:
-            st.subheader("Boucles anormales")
-            if results["boucles"] is not None:
-                st.dataframe(results["boucles"].style.highlight_between(
-                    left=0, 
-                    right=st.session_state.p_value_threshold / 100.0,
-                    props='background-color: #ff0000'
-                ))
-        
-        with tab2:
-            st.subheader("PEAG anormaux")
-            if results["peag"] is not None:
-                st.dataframe(results["peag"].style.highlight_between(
-                    left=0, 
-                    right=st.session_state.p_value_threshold / 100.0,
-                    props='background-color: #ff0000'
-                ))
-        
-        with tab3:
-            st.subheader("OLT anormaux")
-            if results["olt"] is not None:
-                st.dataframe(results["olt"].style.highlight_between(
-                    left=0, 
-                    right=st.session_state.p_value_threshold / 100.0,
-                    props='background-color: #ff0000'
-                ))
-        
-        with tab4:
-            st.subheader("Visualisation 3D - Approche Unidimensionnelle")
+    results = st.session_state.results
+    
+    def highlight_with_color(val, threshold):
+        """
+        ajout de couleur pour valeur < threshold
+        """
+        color = '#ff0000' if val <= threshold else ''
+        return f'background-color: {color}'
+
+
+    with tab1:
+        st.subheader("Boucles anormales")
+        if results["boucles"] is not None:
+            sorted_boucle = results["boucles"].sort_values(by="avg_isolation_forest_score")
             
-            col_test_names, col_test_vars = st.columns([1, 2])
+            # Combinaison des fonctions de style
+            def multi_highlight(df):
+                styles = []
+                for i, v in enumerate(df):
+                    if i in list(range(6)):
+                        styles.append(highlight_with_color(v, st.session_state.p_value_threshold / 100.0))
+                    elif i == 6:
+                        styles.append(highlight_with_color(v, st.session_state.isolation_forest_threshold))
+                    elif i == 7:
+                        styles.append(highlight_with_color(v, 0))
+                    else:
+                        styles.append('')
+                return styles
             
-            with col_test_names:
-                test_name = st.selectbox(
-                    "Choix de la chaîne technique",
-                    options=sorted(list(st.session_state.lignes_1fev['name'].unique()))
-                )
-            with col_test_vars:
-                variables_test = st.multiselect(
-                    "Variables de test (sélectionnez exactement 2)",
-                    options=st.session_state.variables_test
-                )
+            st.dataframe(sorted_boucle.style.apply(multi_highlight, axis=1))
+    
+    with tab2:
+        st.subheader("PEAG anormaux")
+        if results["peag_nro"] is not None:
+            sorted_peag = results["peag_nro"].sort_values(by="avg_isolation_forest_score")
             
-            if len(variables_test) != 2:
-                st.error("Veuillez sélectionner exactement 2 variables de test à représenter en 3D")
-            else:
-                # Créer et afficher le graphique 3D unidimensionnel
-                try:
-                    fig = create_3d_unidim_plot(test_name, variables_test)
-                    st.plotly_chart(fig, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Erreur lors de la création du graphique 3D : {str(e)}")
-    else:
-        results = st.session_state.results_isof
+            # Combinaison des fonctions de style
+            def multi_highlight(df):
+                styles = []
+                for i, v in enumerate(df):
+                    if i in list(range(6)):
+                        styles.append(highlight_with_color(v, st.session_state.p_value_threshold / 100.0))
+                    elif i == 6:
+                        styles.append(highlight_with_color(v, st.session_state.isolation_forest_threshold))
+                    elif i == 7:
+                        styles.append(highlight_with_color(v, 0))
+                    else:
+                        styles.append('')
+                return styles
+            
+            st.dataframe(sorted_peag.style.apply(multi_highlight, axis=1))
+    
+    with tab3:
+        st.subheader("OLT anormaux")
+        if results["olt"] is not None:
+            sorted_olt = results["olt"].sort_values(by="avg_isolation_forest_score")
+            
+            # Combinaison des fonctions de style
+            def multi_highlight(df):
+                styles = []
+                for i, v in enumerate(df):
+                    if i in list(range(6)):
+                        styles.append(highlight_with_color(v, st.session_state.p_value_threshold / 100.0))
+                    elif i == 6:
+                        styles.append(highlight_with_color(v, st.session_state.isolation_forest_threshold))
+                    elif i == 7:
+                        styles.append(highlight_with_color(v, 0))
+                    else:
+                        styles.append('')
+                return styles
+            
+            st.dataframe(sorted_olt.style.apply(multi_highlight, axis=1))
+    
+    with tab4:
+        st.subheader("Visualisation 3D")
         
-        with tab1:
-            st.subheader("Boucles anormales")
-            if results["boucles"] is not None:
-                st.dataframe(results["boucles"].style.apply(
-                    lambda x: ['background-color: #ff0000' if x['is_anomalous'] else '' for i in x.index],
-                    axis=1
-                ))
+        col_test_names, col_test_vars = st.columns([1, 2])
         
-        with tab2:
-            st.subheader("PEAG anormaux")
-            if results["peag"] is not None:
-                st.dataframe(results["peag"].style.apply(
-                    lambda x: ['background-color: #ff0000' if x['is_anomalous'] else '' for i in x.index],
-                    axis=1
-                ))
+        with col_test_names:
+            test_name = st.selectbox(
+                "Choix de la chaîne technique",
+                options=sorted(list(st.session_state.lignes_1fev_copy['name'].unique()))
+            )
+        with col_test_vars:
+            variables_test = st.multiselect(
+                "Variables de test (sélectionnez exactement 2)",
+                options=st.session_state.variables_test
+            )
         
-        with tab3:
-            st.subheader("OLT anormaux")
-            if results["olt"] is not None:
-                st.dataframe(results["olt"].style.apply(
-                    lambda x: ['background-color: #ff0000' if x['is_anomalous'] else '' for i in x.index],
-                    axis=1
-                ))
-        
-        with tab4:
-            st.subheader("Visualisation 3D - Approche Isolation Forest")
-            
-            col_test_names, col_test_vars = st.columns([1, 2])
-            
-            with col_test_names:
-                test_name = st.selectbox(
-                    "Choix de la chaîne technique",
-                    options=sorted(list(st.session_state.lignes_1fev['name'].unique())),
-                    key="if_test_name"
-                )
-            with col_test_vars:
-                variables_test_if = st.multiselect(
-                    "Variables de test (sélectionnez exactement 2)",
-                    options=st.session_state.variables_test,
-                    key="if_variables"
-                )
-            
-            if len(variables_test_if) != 2:
-                st.error("Veuillez sélectionner exactement 2 variables de test à représenter en 3D")
-            else:
-                # Créer et afficher le graphique 3D Isolation Forest
-                try:
-                    fig_if = st.session_state.isolation_forest.create_3d_plot(
-                        st.session_state.df_with_anomalies, test_name, variables_test_if
-                    )
-                    st.plotly_chart(fig_if, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Erreur lors de la création du graphique 3D : {str(e)}")
+        if len(variables_test) != 2:
+            st.error("Veuillez sélectionner exactement 2 variables de test à représenter en 3D")
+        else:
+            # Créer et afficher le graphique 3D unidimensionnel
+            try:
+                fig = create_3d_plot(test_name, variables_test)
+                st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Erreur lors de la création du graphique 3D : {str(e)}")
+    
 
 # Page d'aide
 def show_help():
@@ -841,98 +737,95 @@ def show_help():
 
 # Fonction pour exécuter la détection d'anomalies
 def run_anomaly_detection():
-    if st.session_state.detection_method == "unidimensionnelle":
-        # Instance de classe : recherche les noeuds anormaux
-        nc = NodesChecker()
-        # Calcul des p_values à partir des distributions empiriques
-        lignes_1fev_with_pval = NodesChecker.add_p_values(
-            st.session_state.lignes_1fev.copy(), 
-            st.session_state.dict_distribution_test
-        )
-        
-        # Boucles
-        df_p_values_boucle = nc.get_df_fisher_p_values(
-            lignes_1fev_with_pval,
-            node_type='boucle',
-            p_values=st.session_state.p_values_col
-        )
-        st.session_state.results_unidim["boucles"] = df_p_values_boucle
-        
-        # Filtrer les boucles défaillantes
-        boucles_defaillantes = df_p_values_boucle[df_p_values_boucle.min(axis=1) < st.session_state.p_value_threshold / 100].index
-        lignes_1fev_filtered = lignes_1fev_with_pval.copy()
-        if len(boucles_defaillantes) > 0:
-            lignes_1fev_filtered = lignes_1fev_filtered[~lignes_1fev_filtered['boucle'].isin(boucles_defaillantes)]
-        
-        # PEAG
-        df_p_values_peag = nc.get_df_fisher_p_values(
-            lignes_1fev_filtered,
-            node_type='peag_nro',
-            p_values=st.session_state.p_values_col
-        )
-        st.session_state.results_unidim["peag"] = df_p_values_peag
-        
-        # Filtrer les PEAG défaillants
-        peag_defaillants = df_p_values_peag[df_p_values_peag.min(axis=1) < st.session_state.p_value_threshold / 100].index
-        if len(peag_defaillants) > 0:
-            lignes_1fev_filtered = lignes_1fev_filtered[~lignes_1fev_filtered['peag_nro'].isin(peag_defaillants)]
-        
-        # OLT
-        df_p_values_olt = nc.get_df_fisher_p_values(
-            lignes_1fev_filtered,
-            node_type='olt_name',
-            p_values=st.session_state.p_values_col
-        )
-        st.session_state.results_unidim["olt"] = df_p_values_olt
-        
-        # Sauvegarder le dataframe avec p-values pour la visualisation
-        st.session_state.lignes_1fev_with_pval = lignes_1fev_with_pval
-        
-    else:  # Isolation Forest
-        if not st.session_state.isolation_forest_trained:
-            raise RuntimeError("Le modèle Isolation Forest n'est pas entraîné.")
-        
-        # Appliquer l'Isolation Forest sur les données actuelles
-        df_with_anomalies = st.session_state.isolation_forest.predict(st.session_state.lignes_1fev)
-        
-        # Sauvegarder le dataframe avec scores d'anomalies pour la visualisation
-        st.session_state.df_with_anomalies = df_with_anomalies
-        
-        # Calcul des nœuds anormaux selon chaque type
-        threshold = st.session_state.isolation_forest_threshold
-        
-        # Boucles
-        df_anomalies_boucle = st.session_state.isolation_forest.get_anomalies_by_node(
-            df_with_anomalies, 'boucle', threshold=threshold
-        )
-        st.session_state.results_isof["boucles"] = df_anomalies_boucle
-        
-        # Filtrer les boucles anormales
-        boucles_anormales = df_anomalies_boucle[df_anomalies_boucle['is_anomalous']].index.tolist()
-        df_filtered = df_with_anomalies.copy()
-        if boucles_anormales:
-            df_filtered = df_filtered[~df_filtered['boucle'].isin(boucles_anormales)]
-        
-        # PEAG
-        df_anomalies_peag = st.session_state.isolation_forest.get_anomalies_by_node(
-            df_filtered, 'peag_nro', threshold=threshold
-        )
-        st.session_state.results_isof["peag"] = df_anomalies_peag
-        
-        # Filtrer les PEAG anormaux
-        peag_anormaux = df_anomalies_peag[df_anomalies_peag['is_anomalous']].index.tolist()
-        if peag_anormaux:
-            df_filtered = df_filtered[~df_filtered['peag_nro'].isin(peag_anormaux)]
-        
-        # OLT
-        df_anomalies_olt = st.session_state.isolation_forest.get_anomalies_by_node(
-            df_filtered, 'olt_name', threshold=threshold
-        )
-        st.session_state.results_isof["olt"] = df_anomalies_olt
+    
+
+    # Instance de classe : recherche les noeuds anormaux
+    nc = NodesChecker()
+    # Calcul des p_values à partir des distributions empiriques
+    lignes_1fev_with_pval = NodesChecker.add_p_values(
+        st.session_state.lignes_1fev.copy(), 
+        st.session_state.dict_distribution_test
+    )
+
+    # application de l'isolation forest
+    lignes_1fev_with_if_scores = st.session_state.isolation_forest.predict(st.session_state.lignes_1fev)
+    
+    # Boucles
+    # p values
+    df_p_values_boucle = nc.get_df_fisher_p_values(
+        lignes_1fev_with_pval,
+        node_type='boucle',
+        p_values=st.session_state.p_values_col
+    )
+    # scores d'isolation forest
+    df_if_scores_boucle = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'boucle')
+    df_results_boucle = pd.merge(df_p_values_boucle, 
+                                  df_if_scores_boucle[['avg_isolation_forest_score', 
+                                                       'majority_anomaly_score',
+                                                       'anomaly_percentage',
+                                                       'total_samples',
+                                                       'anomaly_count']], 
+                                  how='left', 
+                                  left_index=True, right_index=True)
+
+    st.session_state.results["boucles"] = df_results_boucle
+    
+    # Filtrer les boucles défaillantes
+    boucles_defaillantes = df_results_boucle[df_results_boucle['avg_isolation_forest_score'] < st.session_state.isolation_forest_threshold].index
+    
+    if len(boucles_defaillantes) > 0:
+        lignes_1fev_with_pval = lignes_1fev_with_pval[~lignes_1fev_with_pval['boucle'].isin(boucles_defaillantes)]
+        lignes_1fev_with_if_scores = lignes_1fev_with_if_scores[~lignes_1fev_with_if_scores['boucle'].isin(boucles_defaillantes)]
+    
+    # PEAG
+    # p values
+    df_p_values_peag = nc.get_df_fisher_p_values(
+        lignes_1fev_with_pval,
+        node_type='peag_nro',
+        p_values=st.session_state.p_values_col
+    )
+    # scores d'isolation forest
+    df_if_scores_peag = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'peag_nro')
+    df_results_peag = pd.merge(df_p_values_peag, 
+                                  df_if_scores_peag[['avg_isolation_forest_score', 
+                                                       'majority_anomaly_score',
+                                                       'anomaly_percentage',
+                                                       'total_samples',
+                                                       'anomaly_count']], 
+                                  how='left', 
+                                  left_index=True, right_index=True)
+    st.session_state.results["peag_nro"] = df_results_peag
+    
+    # Filtrer les PEAG défaillants
+    peag_defaillants = df_results_peag[df_results_peag['avg_isolation_forest_score'] < st.session_state.isolation_forest_threshold].index
+   
+    if len(peag_defaillants) > 0:
+        lignes_1fev_with_pval = lignes_1fev_with_pval[~lignes_1fev_with_pval['peag_nro'].isin(peag_defaillants)]
+        lignes_1fev_with_if_scores = lignes_1fev_with_if_scores[~lignes_1fev_with_if_scores['peag_nro'].isin(peag_defaillants)]
+    
+    # OLT
+    # p values
+    df_p_values_olt = nc.get_df_fisher_p_values(
+        lignes_1fev_with_pval,
+        node_type='olt_name',
+        p_values=st.session_state.p_values_col
+    )
+    # scores d'isolation forest
+    df_if_scores_olt = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'olt_name')
+    df_results_olt = pd.merge(df_p_values_olt, 
+                                  df_if_scores_olt[['avg_isolation_forest_score', 
+                                                       'majority_anomaly_score',
+                                                       'anomaly_percentage',
+                                                       'total_samples',
+                                                       'anomaly_count']], 
+                                  how='left', 
+                                  left_index=True, right_index=True)
+    st.session_state.results["olt"] = df_results_olt
+    
 
 # Fonction pour créer un graphique 3D pour l'approche unidimensionnelle
-def create_3d_unidim_plot(test_name, variables_test):
-    row_to_plot = st.session_state.lignes_1fev_with_pval[st.session_state.lignes_1fev_with_pval['name'] == test_name]
+def create_3d_plot(test_name, variables_test):
+    row_to_plot = st.session_state.lignes_1fev[st.session_state.lignes_1fev['name'] == test_name]
     
     # Axes x et y (distribution empirique)
     x = np.array(st.session_state.dict_distribution_test[variables_test[0]][test_name])

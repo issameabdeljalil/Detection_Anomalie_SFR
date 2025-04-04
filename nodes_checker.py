@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
 from anomaly_detection_one_dim import AnomalyDetectionOneDim # classe de recherche d'anomalies selon la distribution empirique
+from anomaly_detection_isolation_forest import MultiIsolationForestDetector # classe pour l'isolation forest par chaine technique
 from utils import import_json_to_dict
 
 class NodesChecker:
@@ -68,6 +69,22 @@ class NodesChecker:
             for key in p_values.keys():
                 lignes_1fev.loc[index, key] = p_values[key]
         return lignes_1fev
+    
+    @staticmethod
+    def add_isolation_forest_results(lignes_1fev:pd.DataFrame, detector):
+        """
+        Ajoute les p-values de test pour chaque ligne du DataFrame lignes_1fev.
+        
+        Parameters:
+            lignes_1fev (pd.DataFrame): DataFrame sur lequel ajouter les p-values.
+            detector : class MultiIsolationForestDetector() avec models loaded
+        
+        Returns:
+            pd.DataFrame: DataFrame enrichi avec les resultas de l'isolation forest.
+        """
+        results = detector.predict(lignes_1fev)
+        return results
+
     
     @staticmethod
     def fisher_combined_pvalue(pvalues: np.array) -> float:
@@ -192,6 +209,55 @@ class NodesChecker:
         df_p_values = pd.DataFrame.from_dict(dict_p_val_fisher, orient='index')
 
         return df_p_values
+    
+    @staticmethod
+    def get_if_scores_by_node(lignes_1fev_with_if_scores, node_type:str):
+        """
+        Agrège les scores d'Isolation Forest par nœud (moyenne pour les scores continus, 
+        vote majoritaire pour les indicateurs d'anomalie).
+        
+        Paramètres:
+        - lignes_1fev_with_if_scores (pd.DataFrame) : DataFrame contenant les données avec les scores isolation forest
+        - node_type (str) : Type de noeud utilisé pour le regroupement des données.
+                            Exemple : 'boucle', 'peag_nro' ou 'olt_name'
+
+        Retourne:
+        - df_p_values (pd.DataFrame) : DataFrame indexé par les noeuds avec en colonnes les p-values combinées corrigées.
+        """
+        unique_noeuds = lignes_1fev_with_if_scores[node_type].unique()
+        
+        node_results = {}
+        
+        for node in unique_noeuds:
+            # Filtrer les données pour ce nœud
+            node_mask = lignes_1fev_with_if_scores[node_type] == node
+            node_data = lignes_1fev_with_if_scores.loc[node_mask]
+            
+            # Calculer la moyenne des scores continus
+            avg_isolation_score = node_data['isolation_forest_score'].mean()
+            
+            # Vote majoritaire pour anomaly_score (-1 pour anomalie, 1 pour normal)
+            anomaly_count = (node_data['anomaly_score'] == -1).sum()
+            normal_count = (node_data['anomaly_score'] == 1).sum()
+            majority_vote = -1 if anomaly_count > normal_count else 1
+            
+            # Calculer le pourcentage d'anomalies
+            anomaly_percentage = (anomaly_count / len(node_data)) * 100 if len(node_data) > 0 else 0
+            
+            # Stocker les résultats
+            node_results[node] = {
+                'avg_isolation_forest_score': avg_isolation_score,
+                'majority_anomaly_score': majority_vote,
+                'anomaly_percentage': anomaly_percentage,
+                'total_samples': len(node_data),
+                'anomaly_count': anomaly_count
+            }
+        
+        df_node_results = pd.DataFrame.from_dict(node_results, orient='index')
+        # Trier par score moyen (du plus anomal au moins anomal)
+        df_node_results = df_node_results.sort_values('avg_isolation_forest_score')
+        
+        return df_node_results
 
 if __name__ == '__main__':
 
@@ -229,6 +295,7 @@ if __name__ == '__main__':
     'std_dns_time'
     ]
 
+
     # instance de classe : recherche les noeuds anormaux
     nc = NodesChecker()
     # rajout de + 10 de valuers aux tests de 4 peag et 4 olt
@@ -246,9 +313,11 @@ if __name__ == '__main__':
     # calcul des p_values à partir des distributions empiriques
     lignes_1fev = nc.add_p_values(lignes_1fev, dict_test)
 
-    # lignes_1fev.to_csv('data/results/lignes_1fev_with_pval.csv')
-    # lignes_1fev = pd.read_csv('data/results/lignes_1fev_with_pval.csv', index_col=0)
-
+    # calcul des isolation forest scores
+    detector = MultiIsolationForestDetector(chain_id_col = 'name')
+    detector.load_models(lignes_1fev)
+    lignes_1fev_with_if_scores = detector.predict(lignes_1fev)
+    
     p_values_col = [
         'p_val_avg_dns_time',
         'p_val_avg_score_scoring',
@@ -264,15 +333,25 @@ if __name__ == '__main__':
 
     # p_values issues du test de Fisher pour les boucles
     df_p_values_boucle = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'boucle', p_values = p_values_col)
-    
+
+    # scores d'isolation forest
+    df_if_scores_boucle = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'boucle')
+
+
+
+   
     boucles_defaillantes = df_p_values_boucle[df_p_values_boucle['p_val_avg_dns_time'] < 0.01].index.unique()
     lignes_1fev = lignes_1fev[~lignes_1fev['boucle'].isin(boucles_defaillantes)] # on enlève les boucles defaillantes
 
     # p_values issues du test de Fisher pour les peag
     df_p_values_peag = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'peag_nro', p_values = p_values_col)
-
+    # scores d'isolation forest
+    df_if_scores_peag = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'peag_nro')
+    
     peag_defaillants = df_p_values_peag[df_p_values_peag['p_val_avg_dns_time'] < 0.01].index.unique()
     lignes_1fev = lignes_1fev[~lignes_1fev['peag_nro'].isin(peag_defaillants)]  # on enlève les PEAG defaillants
 
     # p_values issues du test de Fisher pour les olt
     df_p_values_olt = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'olt_name', p_values = p_values_col)
+    # scores d'isolation forest
+    df_if_scores_olt = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'olt_name')
