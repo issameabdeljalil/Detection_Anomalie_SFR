@@ -18,6 +18,8 @@ from nodes_checker import NodesChecker
 from utils import import_json_to_dict
 from detection_anomalies_IsolationForest import IsolationForestDetector
 import joblib
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Configuration 
 st.set_page_config(
@@ -119,61 +121,75 @@ def show_header():
     st.markdown("---")
 
 
-# Page d'accueil
+# Page tableau de bord
 def show_home():
     st.header("📊 Tableau de bord")
     
-    # Statistiques générales
+    # Section KPIs principaux
+    st.subheader("Indicateurs clés de performance")
+    
+    # Première ligne - Statistiques générales et métriques réseau
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric(label="Nombre de chaînes techniques", 
                  value=len(st.session_state.lignes_1fev['name'].unique()))
-    with col2:
-        st.metric(label="Nombre d'OLT", 
-                 value=len(st.session_state.lignes_1fev['olt_name'].unique()))
-    with col3:
-        st.metric(label="Nombre de PEAG", 
-                 value=len(st.session_state.lignes_1fev['peag_nro'].unique()))
     
-    # Méthode active
+    # Calcul des temps moyens DNS et latence
+    avg_dns = st.session_state.lignes_1fev['avg_dns_time'].mean()
+    avg_latence = st.session_state.lignes_1fev['avg_latence_scoring'].mean()
+    
+    with col2:
+        st.metric(label="Temps DNS moyen (ms)", 
+                  value=f"{avg_dns:.2f}")
+    with col3:
+        st.metric(label="Latence scoring moyenne (ms)", 
+                  value=f"{avg_latence:.2f}")
+    
+    # Deuxième ligne - Indicateurs de santé réseau
+    st.subheader("Santé du réseau")
+    
+    # Calcul des indicateurs de variabilité
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        # Calcul de la stabilité DNS (basé sur std_dns_time)
+        std_dns = st.session_state.lignes_1fev['std_dns_time'].mean()
+        dns_stability = 100 - min(100, (std_dns / avg_dns * 100))
+        st.metric(label="Stabilité DNS (%)", 
+                  value=f"{dns_stability:.1f}")
+    
+    with col2:
+        # Calcul de la qualité scoring (basé sur avg_score_scoring)
+        avg_score = st.session_state.lignes_1fev['avg_score_scoring'].mean()
+        score_quality = min(100, (avg_score / 5) * 100)  # Supposant que le score max est 5
+        st.metric(label="Qualité scoring (%)", 
+                  value=f"{score_quality:.1f}")
+    
+    with col3:
+        # Calcul de la stabilité latence
+        std_latence = st.session_state.lignes_1fev['std_latence_scoring'].mean()
+        latence_stability = 100 - min(100, (std_latence / avg_latence * 100))
+        st.metric(label="Stabilité latence (%)", 
+                  value=f"{latence_stability:.1f}")
+    
+    # Troisième ligne - Visualisation de la distribution
+    st.subheader("Distribution des métriques clés")
+    
+    # Créer un histogramme pour visualiser les distributions
+    fig = create_metrics_distribution()
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Méthode active d'analyse
     st.info(f"Méthode de détection active: **{st.session_state.detection_method}**")
     
     # Si des anomalies ont été détectées, afficher un résumé
     if st.session_state.anomalies_detected:
         st.subheader("Résumé des anomalies détectées")
         
+        # Afficher les résultats selon la méthode utilisée
         if st.session_state.detection_method == "unidimensionnelle":
-            results = st.session_state.results_unidim
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if results["boucles"] is not None:
-                    anomalous_boucles = results["boucles"][results["boucles"].min(axis=1) < st.session_state.p_value_threshold / 100]
-                    st.metric("Boucles anormales", len(anomalous_boucles))
-            with col2:
-                if results["peag"] is not None:
-                    anomalous_peag = results["peag"][results["peag"].min(axis=1) < st.session_state.p_value_threshold / 100]
-                    st.metric("PEAG anormaux", len(anomalous_peag))
-            with col3:
-                if results["olt"] is not None:
-                    anomalous_olt = results["olt"][results["olt"].min(axis=1) < st.session_state.p_value_threshold / 100]
-                    st.metric("OLT anormaux", len(anomalous_olt))
+            display_unidim_anomaly_summary()
         else:
-            results = st.session_state.results_isof
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if results["boucles"] is not None:
-                    anomalous_boucles = results["boucles"][results["boucles"]["is_anomalous"]]
-                    st.metric("Boucles anormales", len(anomalous_boucles))
-            with col2:
-                if results["peag"] is not None:
-                    anomalous_peag = results["peag"][results["peag"]["is_anomalous"]]
-                    st.metric("PEAG anormaux", len(anomalous_peag))
-            with col3:
-                if results["olt"] is not None:
-                    anomalous_olt = results["olt"][results["olt"]["is_anomalous"]]
-                    st.metric("OLT anormaux", len(anomalous_olt))
+            display_isolation_forest_anomaly_summary()
     
     # Mini ReadMe sur le projet
     st.markdown("---")
@@ -187,6 +203,245 @@ def show_home():
     
     Utilisez le menu ci-dessus pour naviguer entre les différentes fonctionnalités.
     """)
+
+# Fonction pour créer les visualisations de distribution des métriques
+def create_metrics_distribution():
+    
+    # Créer un subplot avec 3 graphiques
+    fig = make_subplots(rows=1, cols=3, 
+                        subplot_titles=("Distribution des temps DNS", 
+                                        "Distribution des scores", 
+                                        "Distribution des latences"))
+    
+    # Histogramme pour les temps DNS
+    fig.add_trace(
+        go.Histogram(
+            x=st.session_state.lignes_1fev['avg_dns_time'],
+            name="Temps DNS",
+            marker_color='#1f77b4',
+            opacity=0.7
+        ),
+        row=1, col=1
+    )
+    
+    # Histogramme pour les scores
+    fig.add_trace(
+        go.Histogram(
+            x=st.session_state.lignes_1fev['avg_score_scoring'],
+            name="Scores",
+            marker_color='#2ca02c',
+            opacity=0.7
+        ),
+        row=1, col=2
+    )
+    
+    # Histogramme pour les latences
+    fig.add_trace(
+        go.Histogram(
+            x=st.session_state.lignes_1fev['avg_latence_scoring'],
+            name="Latences",
+            marker_color='#d62728',
+            opacity=0.7
+        ),
+        row=1, col=3
+    )
+    
+    # Mise à jour de la mise en page
+    fig.update_layout(
+        height=300,
+        bargap=0.1,
+        showlegend=False
+    )
+    
+    return fig
+
+# Fonction pour afficher le résumé des anomalies (approche unidimensionnelle)
+def display_unidim_anomaly_summary():
+    results = st.session_state.results_unidim
+    
+    # Créer 3 colonnes
+    col1, col2, col3 = st.columns(3)
+    
+    # Définir la couleur pour les anomalies et la sévérité
+    threshold = st.session_state.p_value_threshold / 100
+    
+    with col1:
+        if results["boucles"] is not None:
+            anomalous_boucles = results["boucles"][results["boucles"].min(axis=1) < threshold]
+            st.metric("Boucles anormales", len(anomalous_boucles))
+            
+            if not anomalous_boucles.empty:
+                # Trouver les boucles les plus problématiques
+                worst_boucles = anomalous_boucles.min(axis=1).nsmallest(3)
+                st.write("Boucles les plus critiques:")
+                for idx, val in worst_boucles.items():
+                    severity = get_severity_label(val)
+                    st.markdown(f"• **{idx}** ({severity})")
+    
+    with col2:
+        if results["peag"] is not None:
+            anomalous_peag = results["peag"][results["peag"].min(axis=1) < threshold]
+            st.metric("PEAG anormaux", len(anomalous_peag))
+            
+            if not anomalous_peag.empty:
+                # Trouver les PEAG les plus problématiques
+                worst_peag = anomalous_peag.min(axis=1).nsmallest(3)
+                st.write("PEAG les plus critiques:")
+                for idx, val in worst_peag.items():
+                    severity = get_severity_label(val)
+                    st.markdown(f"• **{idx}** ({severity})")
+    
+    with col3:
+        if results["olt"] is not None:
+            anomalous_olt = results["olt"][results["olt"].min(axis=1) < threshold]
+            st.metric("OLT anormaux", len(anomalous_olt))
+            
+            if not anomalous_olt.empty:
+                # Trouver les OLT les plus problématiques
+                worst_olt = anomalous_olt.min(axis=1).nsmallest(3)
+                st.write("OLT les plus critiques:")
+                for idx, val in worst_olt.items():
+                    severity = get_severity_label(val)
+                    st.markdown(f"• **{idx}** ({severity})")
+    
+    # Ajout d'une visualisation des métriques principalement affectées
+    if results["boucles"] is not None and results["peag"] is not None and results["olt"] is not None:
+        display_affected_metrics_chart(results)
+
+# Fonction pour afficher le résumé des anomalies (approche Isolation Forest)
+def display_isolation_forest_anomaly_summary():
+    results = st.session_state.results_isof
+    
+    # Créer 3 colonnes
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if results["boucles"] is not None:
+            anomalous_boucles = results["boucles"][results["boucles"]["is_anomalous"]]
+            st.metric("Boucles anormales", len(anomalous_boucles))
+            
+            if not anomalous_boucles.empty:
+                # Trouver les boucles les plus problématiques (selon la proportion)
+                worst_boucles = anomalous_boucles.sort_values("proportion", ascending=False).head(3)
+                st.write("Boucles les plus critiques:")
+                for idx, row in worst_boucles.iterrows():
+                    st.markdown(f"• **{idx}** ({row['proportion']:.1%})")
+    
+    with col2:
+        if results["peag"] is not None:
+            anomalous_peag = results["peag"][results["peag"]["is_anomalous"]]
+            st.metric("PEAG anormaux", len(anomalous_peag))
+            
+            if not anomalous_peag.empty:
+                # Trouver les PEAG les plus problématiques
+                worst_peag = anomalous_peag.sort_values("proportion", ascending=False).head(3)
+                st.write("PEAG les plus critiques:")
+                for idx, row in worst_peag.iterrows():
+                    st.markdown(f"• **{idx}** ({row['proportion']:.1%})")
+    
+    with col3:
+        if results["olt"] is not None:
+            anomalous_olt = results["olt"][results["olt"]["is_anomalous"]]
+            st.metric("OLT anormaux", len(anomalous_olt))
+            
+            if not anomalous_olt.empty:
+                # Trouver les OLT les plus problématiques
+                worst_olt = anomalous_olt.sort_values("proportion", ascending=False).head(3)
+                st.write("OLT les plus critiques:")
+                for idx, row in worst_olt.iterrows():
+                    st.markdown(f"• **{idx}** ({row['proportion']:.1%})")
+    
+    # Si on a les résultats des anomalies, ajouter une heatmap
+    if hasattr(st.session_state, 'df_with_anomalies'):
+        display_anomaly_heatmap()
+
+# Fonction pour obtenir un label de gravité basé sur la p-value
+def get_severity_label(p_value):
+    if p_value < 0.001:
+        return "Critique"
+    elif p_value < 0.01:
+        return "Sévère"
+    elif p_value < 0.05:
+        return "Modéré"
+    else:
+        return "Faible"
+
+# Fonction pour afficher un graphique sur les métriques les plus affectées
+def display_affected_metrics_chart(results):
+    
+    # Collecter toutes les p-values pour chaque métrique
+    metrics = st.session_state.p_values_col
+    metrics_display = [m.replace('p_val_', '') for m in metrics]
+    
+    # Calculer le nombre d'anomalies par métrique
+    threshold = st.session_state.p_value_threshold / 100
+    anomaly_counts = []
+    
+    # Pour chaque métrique, combien de fois elle est sous le seuil
+    for metric in metrics:
+        count = 0
+        for node_type in ["boucles", "peag", "olt"]:
+            if results[node_type] is not None:
+                count += (results[node_type][metric] < threshold).sum()
+        anomaly_counts.append(count)
+    
+    # graphique à barres
+    fig = go.Figure(data=[
+        go.Bar(
+            x=metrics_display,
+            y=anomaly_counts,
+            marker_color=['#ff9999', '#66b3ff', '#99ff99', '#ffcc99', '#c2c2f0', '#ffb3e6']
+        )
+    ])
+    
+    fig.update_layout(
+        title="Métriques les plus affectées par les anomalies",
+        xaxis_title="Métrique",
+        yaxis_title="Nombre d'anomalies",
+        height=300,
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+# Fonction pour afficher une carte de chaleur des anomalies (Isolation Forest)
+def display_anomaly_heatmap():
+    
+    # Préparer les données pour la heatmap
+    df_anomalies = st.session_state.df_with_anomalies
+    
+    # Calculer le pourcentage d'anomalies par OLT et PEAG
+    cross_tab = pd.crosstab(
+        df_anomalies['peag_nro'], 
+        df_anomalies['olt_name'],
+        values=df_anomalies['anomaly_score'].apply(lambda x: 1 if x == -1 else 0),
+        aggfunc='mean'
+    ).fillna(0)
+    
+    # Limiter à 10 PEAG et 10 OLT maximum pour la lisibilité
+    if cross_tab.shape[0] > 10 or cross_tab.shape[1] > 10:
+        # Identifier les PEAG et OLT avec le plus d'anomalies
+        peag_anomaly_count = cross_tab.sum(axis=1).sort_values(ascending=False).head(10).index
+        olt_anomaly_count = cross_tab.sum(axis=0).sort_values(ascending=False).head(10).index
+        cross_tab = cross_tab.loc[peag_anomaly_count, olt_anomaly_count]
+    
+    fig = go.Figure(data=go.Heatmap(
+        z=cross_tab.values * 100,  # En pourcentage
+        x=cross_tab.columns,
+        y=cross_tab.index,
+        colorscale='Reds',
+        colorbar=dict(title="% Anomalies")
+    ))
+    
+    fig.update_layout(
+        title="Heatmap des anomalies par OLT et PEAG",
+        xaxis_title="OLT",
+        yaxis_title="PEAG",
+        height=400,
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
 
 # Page d'insertion d'anomalies
 def show_anomaly_insertion():
