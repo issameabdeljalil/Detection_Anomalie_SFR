@@ -45,6 +45,9 @@ def initialize_session_state():
             'std_latence_scoring',
             'std_dns_time'
         ]
+        
+        st.session_state.df_with_anomalies = None
+
         # Nouvelles colonnes de p_values à ajouter
         st.session_state.p_values_col = [
             'p_val_avg_dns_time',
@@ -353,6 +356,8 @@ def display_affected_metrics_chart(results):
 
 # Fonction pour afficher une carte de chaleur des anomalies (Isolation Forest)
 def display_anomaly_heatmap():
+    if st.session_state.df_with_anomalies is None:
+        return
     
     # Préparer les données pour la heatmap
     df_anomalies = st.session_state.df_with_anomalies
@@ -749,6 +754,7 @@ def run_anomaly_detection():
 
     # application de l'isolation forest
     lignes_1fev_with_if_scores = st.session_state.isolation_forest.predict(st.session_state.lignes_1fev)
+    st.session_state.df_with_anomalies = lignes_1fev_with_if_scores
     
     # Boucles
     # p values
