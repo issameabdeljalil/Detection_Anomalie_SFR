@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import json
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
 from anomaly_detection_one_dim import AnomalyDetectionOneDim # classe de recherche d'anomalies selon la distribution empirique
@@ -270,7 +271,17 @@ if __name__ == '__main__':
     # lignes_1fev = lignes_31jan.copy()
     # lignes_1fev.rename(columns={'PEAG_OLT_PEBIB':'name'}, inplace=True)
     # lignes_1fev['date_hour'] = '2025-02-01 00:00:00'
+    # print('len avant la suppression des noeuds deffaillants:', len(lignes_1fev))
+    
+    # with open('data/results/dict_deffaillants.json', 'r', encoding='utf-8') as f:
+    #     dict_defaillants = json.load(f)
 
+    # lignes_1fev = lignes_1fev[~lignes_1fev['peag_nro'].isin(dict_defaillants['peag_defaillants'])]
+    # lignes_1fev = lignes_1fev[~lignes_1fev['olt_name'].isin(dict_defaillants['olt_defaillants'])]
+    # lignes_1fev = lignes_1fev[~lignes_1fev['boucle'].isin(dict_defaillants['boucles_defaillantes'])]
+    
+    # print('len apres la suppression des noeuds deffaillants:', len(lignes_1fev))
+    
     # lignes_1fev.to_csv('data/results/lignes_1fev.csv')
     ##
 

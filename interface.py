@@ -547,7 +547,7 @@ def show_detection_config():
         min_value=-1.0, 
         max_value=0.5, 
         value=st.session_state.isolation_forest_threshold, 
-        step=0.1,
+        step=0.05,
         format="%.2f"
     )
     st.session_state.isolation_forest_threshold = new_threshold
@@ -744,7 +744,7 @@ def show_help():
 # Fonction pour exécuter la détection d'anomalies
 def run_anomaly_detection():
     
-
+    
     # Instance de classe : recherche les noeuds anormaux
     nc = NodesChecker()
     # Calcul des p_values à partir des distributions empiriques
@@ -828,7 +828,7 @@ def run_anomaly_detection():
                                   how='left', 
                                   left_index=True, right_index=True)
     st.session_state.results["olt"] = df_results_olt
-    
+
 
 # Fonction pour créer un graphique 3D pour l'approche unidimensionnelle
 def create_3d_plot(test_name, variables_test):
