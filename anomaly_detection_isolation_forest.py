@@ -18,7 +18,7 @@ class MultiIsolationForestDetector:
     Un modèle distinct est créé pour chaque chaine technique
     """
     
-    def __init__(self, chain_id_col = 'OLT_PEAG_boucle'):
+    def __init__(self, chain_id_col = 'PEAG_OLT_PEBIB'):
         self.models = {}  # Dictionnaire pour stocker les modèles par chaîne technique
         self.scalers = {}  # Dictionnaire pour stocker les scalers par chaîne technique
         self.features = ['avg_dns_time', 'std_dns_time', 'avg_latence_scoring',
@@ -377,28 +377,22 @@ class MultiIsolationForestDetector:
 if __name__ == '__main__':
     
     # Chargement des données
-    df = pd.read_parquet('data/raw/250203_tests_fixe_dns_sah_202412_202501.parquet', engine="pyarrow")
-    # choix de preprocessing temporaire
-    df.dropna(inplace=True)
-    df['OLT_PEAG_boucle'] = df['olt_name'] + '_' + df['peag_nro']  + '_' + df['boucle'] 
-    df.drop_duplicates(['date_hour','OLT_PEAG_boucle'], inplace=True)
+    df = pd.read_csv('data/raw/new_df_final.csv')
 
     col_list = ['avg_dns_time', 'std_dns_time', 'nb_test_scoring','nb_test_dns', 'avg_latence_scoring',
         'std_latence_scoring', 'avg_score_scoring', 'std_score_scoring']
-
-    test_df = df.sample(100000, random_state=99)
     
     detector = MultiIsolationForestDetector()
-    detector.train_models(test_df, contamination=0.02, min_samples=20)
-    
-    detector.trend_hp # dictionnaire des trends HP à enlever lors du predict
+    # detector.train_models(df, contamination=0.005, min_samples=100)
 
     lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0)
-    lignes_1fev = lignes_1fev.rename(columns={'name': 'OLT_PEAG_boucle'})
+    lignes_1fev = lignes_1fev.rename(columns={'name': 'PEAG_OLT_PEBIB'})
+
     # Prédiction des anomalies
     detector.load_models(lignes_1fev)
     results = detector.predict(lignes_1fev)
-    detector.get_model_info()['nombre_de_modeles']
+    print(detector.get_model_info()['nombre_de_modeles'])
+
     # Affichage des résultats
     print(f"Nombre d'anomalies détectées: {(results['anomaly_score'] == -1).sum()}")
     print(f"Pourcentage d'anomalies: {(results['anomaly_score'] == -1).mean() * 100:.2f}%")

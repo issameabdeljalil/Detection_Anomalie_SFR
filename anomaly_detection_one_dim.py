@@ -29,7 +29,7 @@ class AnomalyDetectionOneDim:
     def get_test_vectors(df, col_list) -> dict:
         """
         création d'un dict avec colonne de test comme keys et
-        en value un autre dict qui contient les OLT_PEAG_boucle en keys et leurs vecteurs
+        en value un autre dict qui contient les PEAG_OLT_PEBIB en keys et leurs vecteurs
         en values
         
         Parameters:
@@ -38,14 +38,14 @@ class AnomalyDetectionOneDim:
         
         Returns:
         dict : dict avec colonne de test comme keys et
-        en value un autre dict qui contient les OLT_PEAG_boucle en kyes et leurs vecteurs
+        en value un autre dict qui contient les PEAG_OLT_PEBIB en kyes et leurs vecteurs
         en values
     
         """
         # tri des données
         df_sorted = df.sort_values("date_hour")
-        # dict des OLT_PEAG_boucle
-        result_dict = {col: df_sorted.groupby("OLT_PEAG_boucle")[col].apply(list).to_dict() for col in col_list}
+        # dict des PEAG_OLT_PEBIB
+        result_dict = {col: df_sorted.groupby("PEAG_OLT_PEBIB")[col].apply(list).to_dict() for col in col_list}
 
         return result_dict
     
@@ -142,16 +142,17 @@ class AnomalyDetectionOneDim:
         kde : scipy.stats.gaussian_kde
             Objet KDE estimant la distribution du vecteur.
         """
+        vector_clean = vector[np.isfinite(vector)]
         n = nb_test
-        std_dev = np.std(vector, ddof=1)
+        std_dev = np.std(vector_clean, ddof=1)
         # calcul de la largeur de bande selon Silverman
         silverman_bw = (4 / (3 * n)) ** (1 / 5) * std_dev 
 
-        kde = gaussian_kde(vector, bw_method=silverman_bw)
+        kde = gaussian_kde(vector_clean, bw_method=silverman_bw)
         return kde
 
     @staticmethod
-    def compute_p_value(point, kde, nsamples=1000, alternative="two-sided"):
+    def compute_p_value(point, kde, nsamples=100000, alternative="two-sided"):
         """
         Compare un point à la distribution estimée par le KDE et calcule une p-value
         
@@ -256,13 +257,12 @@ class AnomalyDetectionOneDim:
         }
 
 if __name__ == '__main__':
-    # test
-    
-    df = pd.read_parquet('data/raw/250203_tests_fixe_dns_sah_202412_202501.parquet', engine="pyarrow")
-    # choix de preprocessing temporaire
-    df.dropna(inplace=True)
-    df['OLT_PEAG_boucle'] = df['olt_name'] + '_' + df['peag_nro']  + '_' + df['boucle'] 
-    df.drop_duplicates(['date_hour','OLT_PEAG_boucle'], inplace=True)
+
+    # Preprocessing
+    # df = pd.read_csv('data/raw/new_df_final.csv')
+    # df = df.groupby('PEAG_OLT_PEBIB').apply(lambda group: group.ffill().bfill())
+    # df = df.reset_index(level=0, drop=True)
+    # df.to_csv('data/raw/new_df_final.csv')
 
     col_list = ['avg_dns_time', 'std_dns_time', 'nb_test_scoring','nb_test_dns', 'avg_latence_scoring',
         'std_latence_scoring', 'avg_score_scoring', 'std_score_scoring']
@@ -282,13 +282,13 @@ if __name__ == '__main__':
     dict_test = import_json_to_dict(input_path)
 
     # quelques graphiques
-    GraphCreator.plot_series(dict_test, '01_olt_3_01_peag_3_BU1464', 'avg_dns_time', title = '_')
-    GraphCreator.plot_score_histogram(dict_test, '01_olt_3_01_peag_3_BU1464', 'avg_dns_time')
-    plt.show()
+    # GraphCreator.plot_series(dict_test, '01_peag_301_olt_369_pebib_3BU146401', 'avg_dns_time', title = '_')
+    # GraphCreator.plot_score_histogram(dict_test, '01_peag_301_olt_369_pebib_3BU146401', 'avg_dns_time')
+    # plt.show()
 
     # test d'un exemple fictif d'anomalie
     df_t = pd.DataFrame({
-        'name':['01_olt_3_01_peag_3_BU1464'],
+        'name':['01_peag_301_olt_369_pebib_3BU146401'],
         'avg_dns_time': [12.98],
         'std_dns_time': [10.61],
         'avg_latence_scoring': [18.52],

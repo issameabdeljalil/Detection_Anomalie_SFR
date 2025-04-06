@@ -16,6 +16,7 @@ from scipy.stats import gaussian_kde
 import joblib
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tqdm import tqdm
 
 from utils import import_json_to_dict
 from nodes_checker import NodesChecker
@@ -32,7 +33,7 @@ st.set_page_config(
 def initialize_session_state():
     if "donnees_chargees" not in st.session_state:
         # Importation de l'heure simulée
-        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0)
+        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).replace([np.inf, -np.inf], np.nan).dropna()
         st.session_state.lignes_1fev_copy = st.session_state.lignes_1fev.copy()
         # Importation des vecteurs de distribution par test
         st.session_state.dict_distribution_test = import_json_to_dict("data/results/dict_test.json")
@@ -550,7 +551,7 @@ def show_detection_config():
         format="%.2f"
     )
     st.session_state.isolation_forest_threshold = new_threshold
-    st.info(f"Les nœuds avec une moyenne de scores d'anomalies inférieure à {new_threshold:.0%} seront considérés comme anormaux")
+    st.info(f"Les nœuds avec une moyenne de scores d'anomalies inférieure à {new_threshold} seront considérés comme anormaux")
     
     # Lancement de la détection
     st.markdown("---")
