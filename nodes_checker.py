@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import json
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
 from anomaly_detection_one_dim import AnomalyDetectionOneDim # classe de recherche d'anomalies selon la distribution empirique
@@ -261,22 +262,27 @@ class NodesChecker:
 
 if __name__ == '__main__':
 
-    df = pd.read_parquet('data/raw/250203_tests_fixe_dns_sah_202412_202501.parquet', engine="pyarrow")
+    # df = pd.read_csv('data/raw/new_df_final.csv')
 
-    ## Preprocessing temporaire
-    df.dropna(inplace=True)
-    df['OLT_PEAG_boucle'] = df['olt_name'] + '_' + df['peag_nro']  + '_' + df['boucle'] 
-    df.drop_duplicates(['date_hour','OLT_PEAG_boucle'], inplace=True)
+    # ## Simulation
 
-    ## Simulation
+    # # reprise la derniere heure pour simuler le 1er janvier à 00:00:00
+    # lignes_31jan = df[df['date_hour'] == '2025-01-31 23:00:00'].copy()
+    # lignes_1fev = lignes_31jan.copy()
+    # lignes_1fev.rename(columns={'PEAG_OLT_PEBIB':'name'}, inplace=True)
+    # lignes_1fev['date_hour'] = '2025-02-01 00:00:00'
+    # print('len avant la suppression des noeuds deffaillants:', len(lignes_1fev))
+    
+    # with open('data/results/dict_deffaillants.json', 'r', encoding='utf-8') as f:
+    #     dict_defaillants = json.load(f)
 
-    # reprise la derniere heure pour simuler le 1er janvier à 00:00:00
-    lignes_31jan = df[df['date_hour'] == '2025-01-31 23:00:00'].copy()
-    lignes_1fev = lignes_31jan.copy()
-    lignes_1fev.rename(columns={'OLT_PEAG_boucle':'name'}, inplace=True)
-    lignes_1fev['date_hour'] = '2025-02-01 00:00:00'
-
-    lignes_1fev.to_csv('data/results/lignes_1fev.csv')
+    # lignes_1fev = lignes_1fev[~lignes_1fev['peag_nro'].isin(dict_defaillants['peag_defaillants'])]
+    # lignes_1fev = lignes_1fev[~lignes_1fev['olt_name'].isin(dict_defaillants['olt_defaillants'])]
+    # lignes_1fev = lignes_1fev[~lignes_1fev['boucle'].isin(dict_defaillants['boucles_defaillantes'])]
+    
+    # print('len apres la suppression des noeuds deffaillants:', len(lignes_1fev))
+    
+    # lignes_1fev.to_csv('data/results/lignes_1fev.csv')
     ##
 
     lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0)

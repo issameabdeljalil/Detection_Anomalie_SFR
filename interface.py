@@ -16,6 +16,7 @@ from scipy.stats import gaussian_kde
 import joblib
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tqdm import tqdm
 
 from utils import import_json_to_dict
 from nodes_checker import NodesChecker
@@ -32,7 +33,7 @@ st.set_page_config(
 def initialize_session_state():
     if "donnees_chargees" not in st.session_state:
         # Importation de l'heure simulée
-        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0)
+        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).replace([np.inf, -np.inf], np.nan).dropna()
         st.session_state.lignes_1fev_copy = st.session_state.lignes_1fev.copy()
         # Importation des vecteurs de distribution par test
         st.session_state.dict_distribution_test = import_json_to_dict("data/results/dict_test.json")
@@ -45,6 +46,9 @@ def initialize_session_state():
             'std_latence_scoring',
             'std_dns_time'
         ]
+        
+        st.session_state.df_with_anomalies = None
+
         # Nouvelles colonnes de p_values à ajouter
         st.session_state.p_values_col = [
             'p_val_avg_dns_time',
@@ -353,6 +357,8 @@ def display_affected_metrics_chart(results):
 
 # Fonction pour afficher une carte de chaleur des anomalies (Isolation Forest)
 def display_anomaly_heatmap():
+    if st.session_state.df_with_anomalies is None:
+        return
     
     # Préparer les données pour la heatmap
     df_anomalies = st.session_state.df_with_anomalies
@@ -541,11 +547,11 @@ def show_detection_config():
         min_value=-1.0, 
         max_value=0.5, 
         value=st.session_state.isolation_forest_threshold, 
-        step=0.1,
+        step=0.05,
         format="%.2f"
     )
     st.session_state.isolation_forest_threshold = new_threshold
-    st.info(f"Les nœuds avec une moyenne de scores d'anomalies inférieure à {new_threshold:.0%} seront considérés comme anormaux")
+    st.info(f"Les nœuds avec une moyenne de scores d'anomalies inférieure à {new_threshold} seront considérés comme anormaux")
     
     # Lancement de la détection
     st.markdown("---")
@@ -738,7 +744,7 @@ def show_help():
 # Fonction pour exécuter la détection d'anomalies
 def run_anomaly_detection():
     
-
+    
     # Instance de classe : recherche les noeuds anormaux
     nc = NodesChecker()
     # Calcul des p_values à partir des distributions empiriques
@@ -749,6 +755,7 @@ def run_anomaly_detection():
 
     # application de l'isolation forest
     lignes_1fev_with_if_scores = st.session_state.isolation_forest.predict(st.session_state.lignes_1fev)
+    st.session_state.df_with_anomalies = lignes_1fev_with_if_scores
     
     # Boucles
     # p values
@@ -821,7 +828,7 @@ def run_anomaly_detection():
                                   how='left', 
                                   left_index=True, right_index=True)
     st.session_state.results["olt"] = df_results_olt
-    
+
 
 # Fonction pour créer un graphique 3D pour l'approche unidimensionnelle
 def create_3d_plot(test_name, variables_test):
