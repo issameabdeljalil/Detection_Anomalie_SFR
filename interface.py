@@ -254,58 +254,47 @@ def create_metrics_distribution():
 # Fonction pour afficher le résumé des anomalies (approche unidimensionnelle)
 def display_anomaly_summary():
     results = st.session_state.results
-    
     # Créer 3 colonnes
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     # Définir la couleur pour les anomalies et la sévérité
-    threshold = st.session_state.p_value_threshold / 100
+    threshold_p_val = st.session_state.p_value_threshold / 100
+    threshold_if = st.session_state.isolation_forest_threshold
     
     with col1:
-        if results["boucles"] is not None:
-            anomalous_boucles = results["boucles"][results["boucles"].min(axis=1) < threshold]
-            st.metric("Boucles anormales", len(anomalous_boucles))
-            
-            if not anomalous_boucles.empty:
-                # Trouver les boucles les plus problématiques
-                worst_boucles = anomalous_boucles.min(axis=1).nsmallest(3)
-                st.write("Boucles les plus critiques:")
-                for idx, val in worst_boucles.items():
-                    severity = get_severity_label(val)
-                    st.markdown(f"• **{idx}** ({severity})")
-    
-    with col2:
         if results["peag_nro"] is not None:
-            anomalous_peag = results["peag_nro"][results["peag_nro"].min(axis=1) < threshold]
-            st.metric("PEAG anormaux", len(anomalous_peag))
             
+            df = results["peag_nro"]
+            p_val_min = df[['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']].min(axis=1)
+            condition = (p_val_min < threshold_p_val) | (df['avg_isolation_forest_score'] < threshold_if)
+            anomalous_peag = df[condition]
+
+            st.metric("% de PEAG anormaux :", round(100 * len(anomalous_peag) / len(results["peag_nro"]),2))
+            st.metric("Nbr PEAG anormaux / Nbr PEAG :", str(len(anomalous_peag)) + " / " + str(len(results["peag_nro"])))
+
             if not anomalous_peag.empty:
                 # Trouver les PEAG les plus problématiques
                 worst_peag = anomalous_peag.min(axis=1).nsmallest(3)
-                st.write("PEAG les plus critiques:")
+                st.write("PEAG les plus anormaux:")
                 for idx, val in worst_peag.items():
-                    severity = get_severity_label(val)
-                    st.markdown(f"• **{idx}** ({severity})")
+                    st.markdown(f"• **{idx}**")
     
-    with col3:
+    with col2:
         if results["olt"] is not None:
-            anomalous_olt = results["olt"][results["olt"].min(axis=1) < threshold]
-            st.metric("OLT anormaux", len(anomalous_olt))
+            df = results["olt"]
+            p_val_min = df[['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']].min(axis=1)
+            condition = (p_val_min < threshold_p_val) | (df['avg_isolation_forest_score'] < threshold_if)
+            anomalous_olt = df[condition]
+            st.metric("% d\'OLT anormaux :", round(100 * len(anomalous_olt) / len(results["olt"]),2))
+            st.metric("Nbr OLT anormaux / Nbr OLT :", str(len(anomalous_olt)) + " / " + str(len(results["olt"])))
             
             if not anomalous_olt.empty:
                 # Trouver les OLT les plus problématiques
                 worst_olt = anomalous_olt.min(axis=1).nsmallest(3)
-                st.write("OLT les plus critiques:")
+                st.write("OLT les plus anormaux:")
                 for idx, val in worst_olt.items():
-                    severity = get_severity_label(val)
-                    st.markdown(f"• **{idx}** ({severity})")
+                    st.markdown(f"• **{idx}**")
     
-    # Ajout d'une visualisation des métriques principalement affectées
-    if results["boucles"] is not None and results["peag_nro"] is not None and results["olt"] is not None:
-        display_affected_metrics_chart(results)
-        display_anomaly_heatmap()
-
-
 # Fonction pour obtenir un label de gravité basé sur la p-value
 def get_severity_label(p_value):
     if p_value < 0.001:
@@ -533,7 +522,7 @@ def show_detection_config():
     
     new_threshold = st.slider(
         "Seuil (%) de rejet α pour la détection d'anomalies", 
-        min_value=0.5, 
+        min_value=0.0, 
         max_value=20.0, 
         value=st.session_state.p_value_threshold, 
         step=0.05,
@@ -598,8 +587,6 @@ def show_results():
                         styles.append(highlight_with_color(v, st.session_state.p_value_threshold / 100.0))
                     elif i == 6:
                         styles.append(highlight_with_color(v, st.session_state.isolation_forest_threshold))
-                    elif i == 7:
-                        styles.append(highlight_with_color(v, 0))
                     else:
                         styles.append('')
                 return styles
@@ -619,8 +606,6 @@ def show_results():
                         styles.append(highlight_with_color(v, st.session_state.p_value_threshold / 100.0))
                     elif i == 6:
                         styles.append(highlight_with_color(v, st.session_state.isolation_forest_threshold))
-                    elif i == 7:
-                        styles.append(highlight_with_color(v, 0))
                     else:
                         styles.append('')
                 return styles
@@ -640,8 +625,6 @@ def show_results():
                         styles.append(highlight_with_color(v, st.session_state.p_value_threshold / 100.0))
                     elif i == 6:
                         styles.append(highlight_with_color(v, st.session_state.isolation_forest_threshold))
-                    elif i == 7:
-                        styles.append(highlight_with_color(v, 0))
                     else:
                         styles.append('')
                 return styles
@@ -828,7 +811,6 @@ def run_anomaly_detection():
                                   how='left', 
                                   left_index=True, right_index=True)
     st.session_state.results["olt"] = df_results_olt
-
 
 # Fonction pour créer un graphique 3D pour l'approche unidimensionnelle
 def create_3d_plot(test_name, variables_test):
