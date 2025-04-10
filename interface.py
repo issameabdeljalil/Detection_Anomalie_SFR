@@ -33,7 +33,7 @@ st.set_page_config(
 def initialize_session_state():
     if "donnees_chargees" not in st.session_state:
         # Importation de l'heure simulée
-        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).replace([np.inf, -np.inf], np.nan).dropna()
+        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).replace([np.inf, -np.inf], np.nan).dropna().head(300)
         st.session_state.lignes_1fev_copy = st.session_state.lignes_1fev.copy()
         # Importation des vecteurs de distribution par test
         st.session_state.dict_distribution_test = import_json_to_dict("data/results/dict_test.json")
@@ -182,10 +182,8 @@ def show_home():
     
     # Si des anomalies ont été détectées, afficher un résumé
     if st.session_state.anomalies_detected:
-        st.subheader("Résumé des anomalies détectées")
-        
-   
-    display_anomaly_summary()
+        # st.subheader("Résumé des anomalies détectées")
+        display_anomaly_summary()
     
     # Mini ReadMe sur le projet
     st.markdown("---")
@@ -251,15 +249,161 @@ def create_metrics_distribution():
     
     return fig
 
+
+
+def display_node_anomaly_chart():
+    """
+    Crée un graphique de synthèse montrant la distribution des anomalies par type de nœud
+    et leur répartition par variable.
+    """
+    if not st.session_state.anomalies_detected:
+        return
+    
+    # Créer deux colonnes pour les graphiques
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Créer un diagramme à barres pour comparer les proportions d'anomalies par type de nœud
+        node_types = ['PEAG', 'OLT']
+        anomaly_percentages = []
+
+        if st.session_state.results["peag_nro"] is not None:
+            df = st.session_state.results["peag_nro"]
+            p_val_min = df[['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']].min(axis=1)
+            condition = (p_val_min < st.session_state.p_value_threshold / 100) | (df['avg_isolation_forest_score'] < st.session_state.isolation_forest_threshold)
+            anomaly_percentages.append(round(100 * sum(condition) / len(df), 2))
+        else:
+            anomaly_percentages.append(0)
+        
+        if st.session_state.results["olt"] is not None:
+            df = st.session_state.results["olt"]
+            p_val_min = df[['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']].min(axis=1)
+            condition = (p_val_min < st.session_state.p_value_threshold / 100) | (df['avg_isolation_forest_score'] < st.session_state.isolation_forest_threshold)
+            anomaly_percentages.append(round(100 * sum(condition) / len(df), 2))
+        else:
+            anomaly_percentages.append(0)
+        
+        fig = go.Figure([
+            go.Bar(
+                x=node_types,
+                y=anomaly_percentages,
+                marker_color=['#66B3FF', '#99FF99'],  # Seulement deux couleurs maintenant
+                text=anomaly_percentages,
+                textposition='auto',
+            )
+        ])
+        
+        fig.update_layout(
+            title="Pourcentage de nœuds anormaux par type (IsolationForest + Unidimensionnel)",
+            xaxis_title="Type de nœud",
+            yaxis_title="Pourcentage d'anomalies (%)",
+            yaxis=dict(range=[0, 100]),
+            height=350,
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # Remplacer le graphique radar par un graphique à barres horizontales
+        metrics = ['avg_dns_time', 'std_dns_time', 'avg_score_scoring', 
+                  'std_score_scoring', 'avg_latence_scoring', 'std_latence_scoring']
+        
+        # Noms plus lisibles pour l'affichage
+        display_names = [
+            'Temps DNS moyen', 
+            'Écart-type DNS', 
+            'Score scoring moyen', 
+            'Écart-type scoring', 
+            'Latence scoring moyenne', 
+            'Écart-type latence'
+        ]
+        
+        # Compter le nombre d'anomalies par métrique (toutes variables)
+        anomaly_counts = [0] * len(metrics)
+        threshold_p_val = st.session_state.p_value_threshold / 100
+        
+        for i, metric in enumerate(metrics):
+            p_val_col = f'p_val_{metric}'
+            
+            for node_type in ["boucles", "peag_nro", "olt"]:
+                if st.session_state.results[node_type] is not None and p_val_col in st.session_state.results[node_type].columns:
+                    anomaly_counts[i] += (st.session_state.results[node_type][p_val_col] < threshold_p_val).sum()
+        
+        # Créer le graphique à barres horizontales
+        colors = ['#FF9999', '#66B3FF', '#99FF99', '#FFCC99', '#C2C2F0', '#FFB3E6']
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            y=display_names,
+            x=anomaly_counts,
+            orientation='h',
+            marker_color=colors,
+            text=anomaly_counts,
+            textposition='auto',
+        ))
+        
+        fig.update_layout(
+            title="Nombre d'anomalies par métrique (détection unidimensionnelle)",
+            xaxis_title="Nombre d'anomalies",
+            yaxis=dict(
+                categoryorder='total ascending',  # Tri par nombre d'anomalies
+            ),
+            height=350,
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+
 # Fonction pour afficher le résumé des anomalies (approche unidimensionnelle)
 def display_anomaly_summary():
     results = st.session_state.results
-    # Créer 3 colonnes
-    col1, col2 = st.columns(2)
-    
-    # Définir la couleur pour les anomalies et la sévérité
+    # Définir les seuils
     threshold_p_val = st.session_state.p_value_threshold / 100
     threshold_if = st.session_state.isolation_forest_threshold
+    
+    # Créer trois colonnes principales
+    st.subheader("Résumé des anomalies détectées (Isolation Forest + Unidimensionnel)")
+    col1, col2 = st.columns(2)
+    
+    # Fonction pour créer une jauge d'anomalies
+    def create_gauge_chart(percentage, title):
+            fig = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=percentage,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={'text': title},
+                gauge={
+                    'axis': {
+                        'range': [0, 100],
+                        'tickwidth': 1,
+                        'tickcolor': "darkblue",
+                        'tickvals': [0, 25, 50, 75, 100],
+                        'ticktext': ['0', '25', '50', '75', '100'],
+                        'tickangle': 0,  # Assurez-vous que le texte est horizontal
+                        'tickfont': {'size': 12}  # Réduire la taille des étiquettes
+                    },
+                    'bar': {'color': "darkblue"},
+                    'bgcolor': "white",
+                    'borderwidth': 2,
+                    'bordercolor': "gray",
+                    'steps': [
+                        {'range': [0, 25], 'color': 'green'},
+                        {'range': [25, 50], 'color': 'yellow'},
+                        {'range': [50, 75], 'color': 'orange'},
+                        {'range': [75, 100], 'color': 'red'}
+                    ],
+                }
+            ))
+            
+            # Augmenter les marges à droite pour éviter les coupures
+            fig.update_layout(
+                height=200,
+                width=320,  # Définir une largeur fixe
+                margin=dict(l=20, r=50, t=50, b=20),  # Augmenter la marge droite
+                paper_bgcolor="rgba(0,0,0,0)",  # Fond transparent
+                plot_bgcolor="rgba(0,0,0,0)"
+            )
+            return fig
     
     with col1:
         if results["peag_nro"] is not None:
@@ -268,16 +412,25 @@ def display_anomaly_summary():
             p_val_min = df[['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']].min(axis=1)
             condition = (p_val_min < threshold_p_val) | (df['avg_isolation_forest_score'] < threshold_if)
             anomalous_peag = df[condition]
-
-            st.metric("% de PEAG anormaux :", round(100 * len(anomalous_peag) / len(results["peag_nro"]),2))
-            st.metric("Nbr PEAG anormaux / Nbr PEAG :", str(len(anomalous_peag)) + " / " + str(len(results["peag_nro"])))
+            
+            # Pourcentage de PEAG anormaux
+            peag_percent = round(100 * len(anomalous_peag) / len(results["peag_nro"]), 2)
+            
+            # Afficher la jauge
+            st.plotly_chart(create_gauge_chart(peag_percent, f"% de PEAG anormaux"), use_container_width=True)
+            
+            st.metric("Nbr PEAG anormaux / Total", f"{len(anomalous_peag)} / {len(results['peag_nro'])}")
 
             if not anomalous_peag.empty:
                 # Trouver les PEAG les plus problématiques
-                worst_peag = anomalous_peag.min(axis=1).nsmallest(3)
-                st.write("PEAG les plus anormaux:")
-                for idx, val in worst_peag.items():
-                    st.markdown(f"• **{idx}**")
+                worst_peag = anomalous_peag.sort_values('avg_isolation_forest_score').index[:3]
+                
+                # Créer une table avec formatage coloré pour les PEAG les plus anormaux
+                st.markdown("#### PEAG les plus anormaux:")
+                for idx in worst_peag:
+                    score = anomalous_peag.loc[idx, 'avg_isolation_forest_score']
+                    color = 'red' if score < threshold_if else 'orange'
+                    st.markdown(f"<span style='color:{color};font-weight:bold;font-size:16px'>• {idx}</span> (score: {score:.3f})", unsafe_allow_html=True)
     
     with col2:
         if results["olt"] is not None:
@@ -285,15 +438,31 @@ def display_anomaly_summary():
             p_val_min = df[['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']].min(axis=1)
             condition = (p_val_min < threshold_p_val) | (df['avg_isolation_forest_score'] < threshold_if)
             anomalous_olt = df[condition]
-            st.metric("% d\'OLT anormaux :", round(100 * len(anomalous_olt) / len(results["olt"]),2))
-            st.metric("Nbr OLT anormaux / Nbr OLT :", str(len(anomalous_olt)) + " / " + str(len(results["olt"])))
+            
+            # Pourcentage d'OLT anormaux
+            olt_percent = round(100 * len(anomalous_olt) / len(results["olt"]), 2)
+            
+            # Afficher la jauge
+            st.plotly_chart(create_gauge_chart(olt_percent, f"% d'OLT anormaux"), use_container_width=True)
+            
+            st.metric("Nbr OLT anormaux / Total", f"{len(anomalous_olt)} / {len(results['olt'])}")
             
             if not anomalous_olt.empty:
                 # Trouver les OLT les plus problématiques
-                worst_olt = anomalous_olt.min(axis=1).nsmallest(3)
-                st.write("OLT les plus anormaux:")
-                for idx, val in worst_olt.items():
-                    st.markdown(f"• **{idx}**")
+                worst_olt = anomalous_olt.sort_values('avg_isolation_forest_score').index[:3]
+                
+                # Créer une table avec formatage coloré pour les OLT les plus anormaux
+                st.markdown("#### OLT les plus anormaux:")
+                for idx in worst_olt:
+                    score = anomalous_olt.loc[idx, 'avg_isolation_forest_score']
+                    color = 'red' if score < threshold_if else 'orange'
+                    st.markdown(f"<span style='color:{color};font-weight:bold;font-size:16px'>• {idx}</span> (score: {score:.3f})", unsafe_allow_html=True)
+    
+    # Ajouter une section pour un graphique synthétique des anomalies
+    st.markdown("---")
+    if st.session_state.df_with_anomalies is not None:
+        st.subheader("Distribution des anomalies par type de nœud")
+        display_node_anomaly_chart()
     
 # Fonction pour obtenir un label de gravité basé sur la p-value
 def get_severity_label(p_value):
@@ -345,45 +514,45 @@ def display_affected_metrics_chart(results):
     st.plotly_chart(fig, use_container_width=True)
 
 # Fonction pour afficher une carte de chaleur des anomalies (Isolation Forest)
-def display_anomaly_heatmap():
-    if st.session_state.df_with_anomalies is None:
-        return
+# def display_anomaly_heatmap():
+#     if st.session_state.df_with_anomalies is None:
+#         return
     
-    # Préparer les données pour la heatmap
-    df_anomalies = st.session_state.df_with_anomalies
+#     # Préparer les données pour la heatmap
+#     df_anomalies = st.session_state.df_with_anomalies
     
-    # Calculer le pourcentage d'anomalies par OLT et PEAG
-    cross_tab = pd.crosstab(
-        df_anomalies['peag_nro'], 
-        df_anomalies['olt_name'],
-        values=df_anomalies['anomaly_score'].apply(lambda x: 1 if x == -1 else 0),
-        aggfunc='mean'
-    ).fillna(0)
+#     # Calculer le pourcentage d'anomalies par OLT et PEAG
+#     cross_tab = pd.crosstab(
+#         df_anomalies['peag_nro'], 
+#         df_anomalies['olt_name'],
+#         values=df_anomalies['anomaly_score'].apply(lambda x: 1 if x == -1 else 0),
+#         aggfunc='mean'
+#     ).fillna(0)
     
-    # Limiter à 10 PEAG et 10 OLT maximum pour la lisibilité
-    if cross_tab.shape[0] > 10 or cross_tab.shape[1] > 10:
-        # Identifier les PEAG et OLT avec le plus d'anomalies
-        peag_anomaly_count = cross_tab.sum(axis=1).sort_values(ascending=False).head(10).index
-        olt_anomaly_count = cross_tab.sum(axis=0).sort_values(ascending=False).head(10).index
-        cross_tab = cross_tab.loc[peag_anomaly_count, olt_anomaly_count]
+#     # Limiter à 10 PEAG et 10 OLT maximum pour la lisibilité
+#     if cross_tab.shape[0] > 10 or cross_tab.shape[1] > 10:
+#         # Identifier les PEAG et OLT avec le plus d'anomalies
+#         peag_anomaly_count = cross_tab.sum(axis=1).sort_values(ascending=False).head(10).index
+#         olt_anomaly_count = cross_tab.sum(axis=0).sort_values(ascending=False).head(10).index
+#         cross_tab = cross_tab.loc[peag_anomaly_count, olt_anomaly_count]
     
-    fig = go.Figure(data=go.Heatmap(
-        z=cross_tab.values * 100,  # En pourcentage
-        x=cross_tab.columns,
-        y=cross_tab.index,
-        colorscale='Reds',
-        colorbar=dict(title="% Anomalies")
-    ))
+#     fig = go.Figure(data=go.Heatmap(
+#         z=cross_tab.values * 100,  # En pourcentage
+#         x=cross_tab.columns,
+#         y=cross_tab.index,
+#         colorscale='Reds',
+#         colorbar=dict(title="% Anomalies")
+#     ))
     
-    fig.update_layout(
-        title="Heatmap des anomalies par OLT et PEAG",
-        xaxis_title="OLT",
-        yaxis_title="PEAG",
-        height=400,
-        margin=dict(l=0, r=0, t=40, b=0)
-    )
+#     fig.update_layout(
+#         title="Heatmap des anomalies par OLT et PEAG",
+#         xaxis_title="OLT",
+#         yaxis_title="PEAG",
+#         height=400,
+#         margin=dict(l=0, r=0, t=40, b=0)
+#     )
     
-    st.plotly_chart(fig, use_container_width=True)
+#     st.plotly_chart(fig, use_container_width=True)
 
 # Page d'insertion d'anomalies
 def show_anomaly_insertion():
