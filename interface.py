@@ -30,7 +30,8 @@ st.set_page_config(
 def initialize_session_state():
     if "donnees_chargees" not in st.session_state:
         # Importation de l'heure simulée
-        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).replace([np.inf, -np.inf], np.nan).dropna().head(300)
+        # st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).replace([np.inf, -np.inf], np.nan).dropna().head(300)
+        st.session_state.lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0).replace([np.inf, -np.inf], np.nan).dropna()
         st.session_state.lignes_1fev_copy = st.session_state.lignes_1fev.copy()
         # Importation des vecteurs de distribution par test
         st.session_state.dict_distribution_test = import_json_to_dict("data/results/dict_test.json")
@@ -306,9 +307,11 @@ def show_results():
     with tab1:
         st.subheader("Boucles anormales")
         if results["boucles"] is not None:
-            # Filtrer seulement les boucles anormales
+            # Filtrer seulement les boucles anormales - utiliser uniquement 3 p-values principales
             df = results["boucles"].copy()
-            p_val_min = df[st.session_state.p_values_col].min(axis=1)
+            # N'utiliser que les 3 p-values principales (moyennes) pour être cohérent avec le résumé
+            main_p_values = ['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']
+            p_val_min = df[main_p_values].min(axis=1)
             mask_p_val = p_val_min < threshold_p_val
             mask_if = df['avg_isolation_forest_score'] < threshold_if
             filtered_df = df[mask_p_val | mask_if].sort_values(by="avg_isolation_forest_score")
@@ -318,7 +321,7 @@ def show_results():
             filtered_df.loc[mask_p_val & mask_if, 'méthode_détection'] = 'Les deux méthodes'
             filtered_df.loc[mask_p_val & ~mask_if, 'méthode_détection'] = 'Unidimensionnelle'
             filtered_df.loc[~mask_p_val & mask_if, 'méthode_détection'] = 'Isolation Forest'
-            
+
             if filtered_df.empty:
                 st.info("Aucune boucle anormale n'a été détectée avec les seuils actuels.")
             else:
@@ -342,9 +345,11 @@ def show_results():
     with tab2:
         st.subheader("PEAG anormaux")
         if results["peag_nro"] is not None:
-            # Filtrer seulement les PEAG anormaux
+            # Filtrer seulement les PEAG anormaux - utiliser uniquement 3 p-values principales
             df = results["peag_nro"].copy()
-            p_val_min = df[st.session_state.p_values_col].min(axis=1)
+            # N'utiliser que les 3 p-values principales (moyennes) pour être cohérent avec le résumé
+            main_p_values = ['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']
+            p_val_min = df[main_p_values].min(axis=1)
             mask_p_val = p_val_min < threshold_p_val
             mask_if = df['avg_isolation_forest_score'] < threshold_if
             filtered_df = df[mask_p_val | mask_if].sort_values(by="avg_isolation_forest_score")
@@ -378,9 +383,11 @@ def show_results():
     with tab3:
         st.subheader("OLT anormaux")
         if results["olt"] is not None:
-            # Filtrer seulement les OLT anormaux
+            # Filtrer seulement les OLT anormaux - utiliser uniquement 3 p-values principales
             df = results["olt"].copy()
-            p_val_min = df[st.session_state.p_values_col].min(axis=1)
+            # N'utiliser que les 3 p-values principales (moyennes) pour être cohérent avec le résumé
+            main_p_values = ['p_val_avg_dns_time', 'p_val_avg_score_scoring', 'p_val_avg_latence_scoring']
+            p_val_min = df[main_p_values].min(axis=1)
             mask_p_val = p_val_min < threshold_p_val
             mask_if = df['avg_isolation_forest_score'] < threshold_if
             filtered_df = df[mask_p_val | mask_if].sort_values(by="avg_isolation_forest_score")
