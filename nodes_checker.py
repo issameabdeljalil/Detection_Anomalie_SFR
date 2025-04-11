@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 from scipy.stats import chi2
 from anomaly_detection_one_dim import AnomalyDetectionOneDim # classe de recherche d'anomalies selon la distribution empirique
 from anomaly_detection_isolation_forest import MultiIsolationForestDetector # classe pour l'isolation forest par chaine technique
-from utils import import_json_to_dict
+from anomaly_detection_mahalanobis import MahalanobisDetector # classe pour la distance de Mahalanobis par chaine technique
+from utils import import_json_to_dict, export_dict_to_json
 
 class NodesChecker:
     """
@@ -86,6 +87,20 @@ class NodesChecker:
         results = detector.predict(lignes_1fev)
         return results
 
+    @staticmethod
+    def add_mahalanobis_results(lignes_1fev:pd.DataFrame, detector):
+        """
+        Ajoute les résultats de l'analyse Mahalanobis pour chaque ligne du DataFrame.
+        
+        Parameters:
+            lignes_1fev (pd.DataFrame): DataFrame sur lequel ajouter les résultats.
+            detector : MahalanobisDetector avec modèles chargés
+        
+        Returns:
+            pd.DataFrame: DataFrame enrichi avec les résultats Mahalanobis.
+        """
+        results = detector.predict(lignes_1fev)
+        return results
     
     @staticmethod
     def fisher_combined_pvalue(pvalues: np.array) -> float:
@@ -260,59 +275,94 @@ class NodesChecker:
         
         return df_node_results
 
+
+    @staticmethod
+    def get_mahalanobis_scores_by_node(lignes_1fev_with_mah_scores, node_type:str):
+        """
+        Agrège les scores Mahalanobis par nœud.
+        
+        Paramètres:
+        - lignes_1fev_with_mah_scores (pd.DataFrame) : DataFrame avec scores Mahalanobis
+        - node_type (str) : Type de noeud pour le regroupement (boucle, peag_nro, olt_name)
+
+        Retourne:
+        - pd.DataFrame : DataFrame avec scores agrégés par nœud
+        """
+        unique_noeuds = lignes_1fev_with_mah_scores[node_type].unique()
+        
+        node_results = {}
+        
+        for node in unique_noeuds:
+            # Filtrer les données pour ce nœud
+            node_mask = lignes_1fev_with_mah_scores[node_type] == node
+            node_data = lignes_1fev_with_mah_scores.loc[node_mask]
+            
+            # Statistiques sur les distances Mahalanobis et p-values
+            avg_mahalanobis_distance = node_data['mahalanobis_distance'].mean()
+            avg_mahalanobis_pvalue = node_data['mahalanobis_pvalue'].mean()
+            
+            # Pourcentage d'anomalies
+            anomaly_count = node_data['mahalanobis_anomaly'].sum()
+            anomaly_percentage = (anomaly_count / len(node_data)) * 100 if len(node_data) > 0 else 0
+            
+            # Stocker les résultats
+            node_results[node] = {
+                'avg_mahalanobis_distance': avg_mahalanobis_distance,
+                'avg_mahalanobis_pvalue': avg_mahalanobis_pvalue,
+                'mahalanobis_anomaly_percentage': anomaly_percentage,
+                'mahalanobis_anomaly_count': anomaly_count,
+                'total_samples': len(node_data)
+            }
+        
+        df_node_results = pd.DataFrame.from_dict(node_results, orient='index')
+        # Trier par distance moyenne (décroissante)
+        df_node_results = df_node_results.sort_values('avg_mahalanobis_distance', ascending=False)
+        
+        return df_node_results
+
+
 if __name__ == '__main__':
 
-    df = pd.read_csv('data/raw/new_df_final.csv')
-
-    ## Simulation
-
-    # reprise la derniere heure pour simuler le 1er janvier à 00:00:00
-    lignes_31jan = df[df['date_hour'] == '2025-01-31 23:00:00'].copy()
-    lignes_1fev = lignes_31jan.copy()
-    lignes_1fev.rename(columns={'PEAG_OLT_PEBIB':'name'}, inplace=True)
-    lignes_1fev['date_hour'] = '2025-02-01 00:00:00'
-  
-    lignes_1fev.to_csv('data/results/lignes_1fev.csv')
-    #
-
+    # Chargement des données
     lignes_1fev = pd.read_csv('data/results/lignes_1fev.csv', index_col=0)
-
+    
     input_path = "data/results/dict_test.json"
-    # importation des vecteurs de distribution par test
+    # Importation des vecteurs de distribution par test
     dict_test = import_json_to_dict(input_path)
 
-    # colonnes dans lesquelles injecter des anomalies
+    # Colonnes dans lesquelles injecter des anomalies
     cols_to_update = [
-    'avg_score_scoring',
-    'avg_latence_scoring',
-    'avg_dns_time',
-    'std_score_scoring',
-    'std_latence_scoring',
-    'std_dns_time'
+        'avg_score_scoring',
+        'avg_latence_scoring',
+        'avg_dns_time',
+        'std_score_scoring',
+        'std_latence_scoring',
+        'std_dns_time'
     ]
 
-
-    # instance de classe : recherche les noeuds anormaux
+    # Instance de classe : recherche les noeuds anormaux
     nc = NodesChecker()
-    # rajout de + 10 de valuers aux tests de 4 peag et 4 olt
-    # lignes_1fev = nc.add_anomalies(lignes_1fev, 
-    #             'peag_nro', 
-    #             ['01_peag_1', '01_peag_2', '01_peag_3', '01_peag_22'],
-    #             cols_to_update,
-    #             10.0)
+    
+    # Rajout de +10 de valeurs aux tests des OLT
     lignes_1fev = nc.add_anomalies(lignes_1fev, 
                 'olt_name', 
                 ['01_olt_1', '01_olt_2', '01_olt_3', '01_olt_23', '95_olt_5624', 
                  '01_olt_70', '95_olt_5625', '95_olt_5630', '95_olt_5627', '95_olt_5626'],
                 cols_to_update,
                 10.0)
-    # calcul des p_values à partir des distributions empiriques
+    
+    # Calcul des p_values à partir des distributions empiriques
     lignes_1fev = nc.add_p_values(lignes_1fev, dict_test)
 
-    # calcul des isolation forest scores
-    detector = MultiIsolationForestDetector(chain_id_col = 'name')
+    # Calcul des isolation forest scores
+    detector = MultiIsolationForestDetector(chain_id_col='name')
     detector.load_models(lignes_1fev)
     lignes_1fev_with_if_scores = detector.predict(lignes_1fev)
+    
+    # Calcul des scores Mahalanobis
+    detector_mah = MahalanobisDetector(chain_id_col='name')
+    detector_mah.load_models(lignes_1fev)
+    lignes_1fev_with_mah_scores = nc.add_mahalanobis_results(lignes_1fev, detector_mah)
     
     p_values_col = [
         'p_val_avg_dns_time',
@@ -323,31 +373,75 @@ if __name__ == '__main__':
         'p_val_std_latence_scoring'
     ]
 
-    # On regarde les boucles defaillantes -> on enlève ces boucles defaillantes
-    # On regarde les PEAG defaillants -> on enlève ces PEAG defaillants
-    # On regarde les OLT defaillants
+    # ANALYSE HIÉRARCHIQUE DES NOEUDS
+    # 1. On regarde les boucles défaillantes
 
-    # p_values issues du test de Fisher pour les boucles
-    df_p_values_boucle = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'boucle', p_values = p_values_col)
-
-    # scores d'isolation forest
-    df_if_scores_boucle = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'boucle')
-
-
-
-   
-    boucles_defaillantes = df_p_values_boucle[df_p_values_boucle['p_val_avg_dns_time'] < 0.01].index.unique()
-    lignes_1fev = lignes_1fev[~lignes_1fev['boucle'].isin(boucles_defaillantes)] # on enlève les boucles defaillantes
-
-    # p_values issues du test de Fisher pour les peag
-    df_p_values_peag = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'peag_nro', p_values = p_values_col)
-    # scores d'isolation forest
-    df_if_scores_peag = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'peag_nro')
+    # P-values issues du test de Fisher pour les boucles
+    df_p_values_boucle = nc.get_df_fisher_p_values(lignes_1fev, node_type='boucle', p_values=p_values_col)
+    # Scores d'isolation forest
+    df_if_scores_boucle = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type='boucle')
+    # Scores Mahalanobis
+    df_mah_scores_boucle = nc.get_mahalanobis_scores_by_node(lignes_1fev_with_mah_scores, node_type='boucle')
     
-    peag_defaillants = df_p_values_peag[df_p_values_peag['p_val_avg_dns_time'] < 0.01].index.unique()
-    lignes_1fev = lignes_1fev[~lignes_1fev['peag_nro'].isin(peag_defaillants)]  # on enlève les PEAG defaillants
+    # Identification des boucles défaillantes avec fusion des résultats
+    boucles_defaillantes_fisher = df_p_values_boucle[df_p_values_boucle['p_val_avg_dns_time'] < 0.01].index.unique()
+    boucles_defaillantes_mah = df_mah_scores_boucle[df_mah_scores_boucle['mahalanobis_anomaly_percentage'] > 50].index.unique()
+    
+    # Union des résultats des deux méthodes
+    boucles_defaillantes = list(set(boucles_defaillantes_fisher).union(set(boucles_defaillantes_mah)))
+    print(f"Nombre de boucles défaillantes détectées: {len(boucles_defaillantes)}")
+    
+    # On enlève les boucles défaillantes
+    lignes_1fev = lignes_1fev[~lignes_1fev['boucle'].isin(boucles_defaillantes)]
 
-    # p_values issues du test de Fisher pour les olt
-    df_p_values_olt = nc.get_df_fisher_p_values(lignes_1fev, node_type = 'olt_name', p_values = p_values_col)
-    # scores d'isolation forest
-    df_if_scores_olt = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type = 'olt_name')
+    # 2. On analyse les PEAG défaillants
+    
+    # P-values issues du test de Fisher pour les PEAG
+    df_p_values_peag = nc.get_df_fisher_p_values(lignes_1fev, node_type='peag_nro', p_values=p_values_col)
+    # Scores d'isolation forest
+    df_if_scores_peag = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type='peag_nro')
+    # Scores Mahalanobis
+    df_mah_scores_peag = nc.get_mahalanobis_scores_by_node(lignes_1fev_with_mah_scores, node_type='peag_nro')
+    
+    # Identification des PEAG défaillants avec fusion des résultats
+    peag_defaillants_fisher = df_p_values_peag[df_p_values_peag['p_val_avg_dns_time'] < 0.01].index.unique()
+    peag_defaillants_mah = df_mah_scores_peag[df_mah_scores_peag['mahalanobis_anomaly_percentage'] > 50].index.unique()
+    
+    # Union des résultats des deux méthodes
+    peag_defaillants = list(set(peag_defaillants_fisher).union(set(peag_defaillants_mah)))
+    print(f"Nombre de PEAG défaillants détectés: {len(peag_defaillants)}")
+    
+    # On enlève les PEAG défaillants
+    lignes_1fev = lignes_1fev[~lignes_1fev['peag_nro'].isin(peag_defaillants)]
+
+    # 3. On analyse les OLT défaillants
+    
+    # P-values issues du test de Fisher pour les OLT
+    df_p_values_olt = nc.get_df_fisher_p_values(lignes_1fev, node_type='olt_name', p_values=p_values_col)
+    # Scores d'isolation forest
+    df_if_scores_olt = nc.get_if_scores_by_node(lignes_1fev_with_if_scores, node_type='olt_name')
+    # Scores Mahalanobis
+    df_mah_scores_olt = nc.get_mahalanobis_scores_by_node(lignes_1fev_with_mah_scores, node_type='olt_name')
+    
+    # Identification des OLT défaillants avec fusion des résultats
+    olt_defaillants_fisher = df_p_values_olt[df_p_values_olt['p_val_avg_dns_time'] < 0.01].index.unique()
+    olt_defaillants_mah = df_mah_scores_olt[df_mah_scores_olt['mahalanobis_anomaly_percentage'] > 50].index.unique()
+    
+    # Union des résultats des deux méthodes
+    olt_defaillants = list(set(olt_defaillants_fisher).union(set(olt_defaillants_mah)))
+    print(f"Nombre d'OLT défaillants détectés: {len(olt_defaillants)}")
+    
+    # Création d'un dictionnaire pour stocker les nœuds défaillants
+    dict_defaillants = {
+        'boucles_defaillantes': list(boucles_defaillantes),
+        'peag_defaillants': list(peag_defaillants),
+        'olt_defaillants': list(olt_defaillants)
+    }
+    
+    # Exporter ce dictionnaire
+    export_dict_to_json(dict_defaillants, 'data/results/dict_defaillants.json')
+    
+    # Exporter les DataFrames de résultats pour analyse ultérieure
+    df_p_values_olt.to_csv('data/results/df_p_values_olt.csv')
+    df_if_scores_olt.to_csv('data/results/df_if_scores_olt.csv')
+    df_mah_scores_olt.to_csv('data/results/df_mah_scores_olt.csv')
