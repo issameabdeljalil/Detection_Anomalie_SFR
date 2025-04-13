@@ -2,6 +2,8 @@
 
 Ce projet est une application de détection d'anomalies pour le réseau SFR, développée dans le cadre du Challenge Nexialog & Université Paris 1 Panthéon-Sorbonne. L'application permet d'anticiper les problèmes réseau avant qu'ils n'impactent les clients, en utilisant des techniques avancées de détection d'anomalies sur les données de tests réseau.
 
+![Structure de notre inferface](images/Image_ReadMe.png)
+
 ## Fonctionnalités
 
 - **Analyse de l'état du réseau** : Visualisation des statistiques globales, indicateurs de performance et de santé du réseau
@@ -29,7 +31,7 @@ Ce projet est une application de détection d'anomalies pour le réseau SFR, dé
 
 ## Architecture du code
 
-- `interface.py` : Application Streamlit principale
+- `interface_chahla.py` : Application Streamlit principale
 - `anomaly_detection_one_dim.py` : Implémentation de la détection unidimensionnelle
 - `anomaly_detection_isolation_forest.py` : Implémentation de l'algorithme Isolation Forest
 - `anomaly_detection_mahalanobis.py` : Implémentation de la méthode Mahalanobis
@@ -52,7 +54,7 @@ pip install -r requirements.txt
 ```
 3. Lancer l'application:
 ``` bash
-streamlit run interface.py
+streamlit run interface_chahla.py
 ```
 
 ## Structure des données
